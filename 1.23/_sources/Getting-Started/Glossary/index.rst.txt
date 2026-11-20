@@ -1,0 +1,20 @@
+Glossary
+========
+
+Cloud AI Glossary
+
+.. csv-table::
+   :widths: 40, 60
+   :header: "Term", "Description"
+   
+   "AI Cores / AI compute cores / NSP", "These terms are interchangably used to see the Neural Signal Processor cores in the Cloud AI Platforms. The NSP cores run the inference."
+   "Instance / activation", "A single Instance or activation refers to a QPC executing on a set of AI cores."
+   "QAIC / AIC / Cloud AI/ AIC100", "These terms are interchangably used to see Cloud AI. These terms are typically followed by the subject (like Compiler / SDK / library etc) being discussed."
+   "QPC (Qaic Program Container) / model binary / network binary", "Cloud AI platforms can execute a QPC. A pre-trained model needs to be compiled to generate a QPC. QPC / model binary / network binary terms are used interchangably."
+   "TCM / VTCM", "(Vector) Tightly-Coupled Memory. On-chip or in-NSP memory as featured in the ARM specification."
+   "ECC", "Error Correcting Code. Error correction in the TCM as featured in the ARM specification."
+   "VM/KVM", ":ref:`(Kernel-based) Virtual Machine <reference-to-hypervisors>`."
+   "ONNX", "`Open Neural Network Exchange <https://en.wikipedia.org/wiki/Open_Neural_Network_Exchange>`__ file format."
+   "AoT (Ahead-of-Time) mode", "vLLM execution mode in which a model is exported and compiled into a QPC before it runs on Cloud AI. See :doc:`vLLM execution modes </Getting-Started/Model-Serving/vLLM-Serving/Execution-Modes>`."
+   "PyT (PyTorch eager) mode", "Experimental vLLM execution mode in which PyTorch runs the model directly and ``torch_qaic`` dispatches operators to Cloud AI, with no compilation step. See :doc:`vLLM execution modes </Getting-Started/Model-Serving/vLLM-Serving/Execution-Modes>`."
+   "torch_qaic", "PyTorch backend for Cloud AI accelerators. It registers the ``qaic`` device with PyTorch and runs PyTorch operators on the accelerator through a JIT runtime. It's installed with the Apps SDK."

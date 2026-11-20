@@ -1,0 +1,5 @@
+:orphan:
+
+.. Keep the previously published dashboard URL available.
+
+.. include:: examples-how-to-guides.rst

@@ -1,0 +1,56 @@
+
+.. _reference-to-system-management:
+
+System management
+=================
+
+.. toctree::
+   :maxdepth: 2
+   :titlesonly:
+   :hidden:
+
+   system-management/index
+   aic-manager/aic-manager
+
+The Cloud AI SDK provides command line tools and APIs for system management and monitoring tasks.
+
+Command line tools for system management
+------------------------------------------
+
+The Cloud AI Platform SDK provides the following command line tools 
+for monitoring card health, managing hardware resources, and 
+diagnosing system issues.
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Tool
+     - Description
+   * - :doc:`qaic-util <../SDK-Tools/shared/qaic_util>`
+     - Query card and SoC health, firmware version, compute/memory/IO 
+       resources, power, temperature, and device capabilities such as ECC.
+   * - :doc:`qaic-version-util <../SDK-Tools/shared/qaic_version_util>`
+     - Display the installed SDK version.
+   * - :doc:`qaic-log <../SDK-Tools/shared//qaic_logger>`
+     - Capture and manage device logs.
+   * - :doc:`qaic-monitor-json <../SDK-Tools/shared//qaic_monitor_app>`
+     - Configure and monitor device properties using JSON input files, 
+       including LLM network mode on Ultra SKUs.
+   * - :doc:`QAicUdevMonitor <../SDK-Tools/shared/qaicudevmonitor>`
+     - Monitor device connection and disconnection events.
+   * - :doc:`qaic-trace-ctl <../SDK-Tools/shared/qaic_trace_control>`
+     - Control trace capture for diagnostics and debugging.
+
+APIs for system management
+---------------------------
+
+AIC-manager (AICM) provides APIs for external frameworks and administration dashboards to retrieve telemetry and health data from AIC devices. See :doc:`AIC Manager <aic-manager/aic-manager>` for more information.
+
+Next steps
+----------
+
+* For advanced system management details including security, boot and firmware management, and BMC integration, see `Cloud AI Card Management <https://docs.qualcomm.com/bundle/resource/topics/80-PT790-995F>`__.
+
+* You can also use Python APIs to monitor the health and resources of the cards/SoCs. See :ref:`Util class <reference-to-python-api-class-util>` for more information.
+

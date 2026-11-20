@@ -1,0 +1,257 @@
+Execute the QPC
+###############
+
+.. v1.21 github doc has a stub page with the following links. keeping here for memory, but delete if new format works.
+   Refer to the following sections for details on QPC binary execution:
+
+   * :ref:`reference-to-model-execution-options`
+
+   * :ref:`reference-to-inference-profiling`
+
+   * :ref:`Triton inference server <reference-to-Triton-Inference-Server>`
+
+   * :ref:`vLLM <reference_to_vllm>`
+
+   * :ref:`Text Generation Inference <reference_to_text_generation_inference>`
+
+
+After :ref:`compiling the model <reference-to-compile-the-model>` into a QPC, the next step is to run inference on the device using the precompiled QPC. There are four ways to call inference on the Qualcomm Cloud AI 100 device:
+
+* Use ``qaic-runner``
+  
+* Use Python APIs
+
+* Use C++ APIs
+
+* Use ONNX Runtime
+
+This section describes how to use ``qaic-runner`` to call inference, how to configure profiling options to collect :ref:`inference performance <reference-to-inference-profiling>` metrics, and how to :ref:`run multiple models simultaneously <run-multiple-models>` on the same hardware using ``qaic-program-group-app``. 
+
+See :ref:`Next steps <model-execution-next-steps>` for information about how to use Python, C++, and ONNX Runtime to call inference and execute the QPC.
+
+.. _reference-to-qaic-visible-devices:
+
+Device Visibility: ``QAIC_VISIBLE_DEVICES``
+*****************************************************
+
+The environment variable controls which Cloud AI devices are visible to an application and the order of device enumeration. This setting applies only to inference methods: ``qaic-runner``, Python APIs, C++ APIs and ONNX Runtime.
+
+- If not set, all devices are visible.
+- If set, only the listed devices are visible, enumerated in the order provided.
+
+Value: Comma-separated integer sequence of device QIDs, as reported by ``qaic-util -q``.
+
+The provided values are strictly checked. Any invalid or missing index will cause device enumeration to fail.
+
+**Example:**
+
+::
+
+   export QAIC_VISIBLE_DEVICES=3,1
+
+This will make devices 0 and 2 not visible to the application. The order of indices provided determines the QID assignment within the application. QID 0 and QID 1 will correspond to devices 3 and 1 respectively. Henceforth, the device count and QIDs seen will be within the range ``[0, number of visible devices - 1]``.
+
+.. note::
+
+   System and diagnostic tools such as ``qaic-util``, ``qaic-log``, and ``qaic-firmware-updater`` ignore the ``QAIC_VISIBLE_DEVICES`` environment variable and will always show all devices.
+
+Use ``qaic-runner``
+********************
+
+The ``qaic-runner`` is a command line interface (CLI) tool designed to facilitate inference performance and benchmarking analysis. It provides various options and functionalities to facilitate inference and performance/benchmarking analysis Use ``qaic-runner`` primarily for performance testing purposes. For actual inference tasks, it is recommended to use the :ref:`Python APIs <reference-to-python-api>` or :ref:`C++ APIs <reference-to-cpp-api>`, depending on your preferred technology stack.
+
+Prerequisites
+===============
+
+The examples in this section assume that a :ref:`QPC <reference-to-compile-the-model>` is already generated.
+
+Usage examples
+================
+
+The examples in this section show how to:
+
+* Run inference in ``qaic-runner`` with random inputs
+
+* Run inference on a set of inputs that you provide.
+
+* Generate dumps and device level profiling.
+
+Run inference in ``qaic-runner`` with random inputs
+----------------------------------------------------
+
+This example shows running inference in ``qaic-runner`` with random inputs. Because inputs aren't provided, you're feeding a randomly generated input to the device with the appropriate dimensions and type inferred from the QPC. You can use ``qaic-runner`` in this configuration to measure performance.
+
+::
+
+    sudo /opt/qti-aic/exec/qaic-runner -t /path/to/qpc  -a 3 -n 5000 -d 0 -v
+
+- ``-a 3``: Number of activations.  Activations here refers to the number of instances of the network you want to run on the device. In this case 3 copies of the network can run in parallel on the device.
+
+   -  If you assume each network was compiled with 4 cores, then the device needs at least 12 (3x4) cores free.
+   -  You can use ``sudo /opt/qti-aic/tools/qaic-qpc validate -i /path/to/qpc/programqpc.bin`` and look for ``Number of NSP required`` in the output to find the number of cores.
+
+-  ``-n 5000``: Number of iterations. This single randomly generated input is used for 5000 inferences.
+
+-  ``-d 0``: The device ID. Use ``/opt/qti-aic/tools/qaic-util -q`` to find the device ID.
+
+-  ``-v``: Enables verbose logging.
+
+
+Run inference on a set of inputs
+---------------------------------------
+
+Before running inference, it's necessary to convert the inputs to the appropriate format based on input size and type. Look at these `Jupyter notebook examples <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials/NLP/Model-Onboarding-Beginner>`__.
+
+
+Generate dumps for latency capture
+---------------------------------------
+
+The following example command shows how to generate latency stats:
+
+::
+
+    !/opt/qti-aic/exec/qaic-runner -t ./BERT_LARGE -a 8 -S 1 -d 0 \ #-i inputFiles/input.raw \
+    --aic-profiling-format latency --aic-profiling-out-dir ./BERT_LARGE_STATS \
+    --aic-profiling-start-iter 100 --aic-profiling-num-samples 99999 --time 20 
+
+-  ``aic-profiling-out-dir`` : Output directory for latency capture
+   (needs to exist before this command is run).
+-  ``aic-profiling-start-iter`` : Set this value high enough to start
+   capturing samples after device warmup.
+-  ``aic-profiling-num-samples`` : Number of samples to be captured. Can be
+   set greater than the number of inferences.
+
+
+Look at this Jupyter notebook
+`example <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials/NLP/Profiler-Intermediate>`__.
+
+
+Parameters and default values
+===============================
+
+The following table lists the ``qaic-runner`` parameters and default values:
+
+
+.. dropdown:: qaic-runner parameters
+   :color: light
+   :class-container: sd-border-1
+
+   .. csv-table::
+      :widths: 46, 46, 8
+      :header: "Parameter", "Description", "Default"
+      
+      "``-d, --aic-device-id <id>``", "Specify AIC device ID.", "0"
+      "``-D, --dev-list <qid>[:<qid>]``", "Map of device IDs for a multi-device network.", "0[:1]"
+      "``-d, --aic-device-id <id>``", "AIC device ID, default Auto-pick", "0"
+      "``-D, --aic-device-map <qid>[:<qid>]``", "Map of Device IDs for multi-device network,", "0[:1]"
+      "``-t, --test-data <path>``", "Location of program binaries", ""
+      "``-i, --input-file <path>``", "Input filename from which to load input data. Specify multiple times for each input file. If no -i is given, look for available inputs in bindings.json at the -t directory. If bindings.json is not available, random input will be generated.", ""
+      "``-n, --num-iter <num>``", "Number of iterations,", "40"
+      "``--time <t>``", "Duration (in seconds) for which to submit inferences", ""
+      "``-l, --live-reporting``", "Enable Live reporting periodic at 1 sec interval", "off"
+      "-r, --live-reporting-period", "Set Live Reporting Period in Ms", "1000"
+      "``-s --stats``", "Enable Live Profiling Stats reporting periodically at 1 sec interval", ""
+      "``-a, --aic-num-of-activations <num>``", "Number of activations", "1"
+      "``--aic-profiling-start-iter <num>``", "Profiling Start Iteration", "0"
+      "``--aic-profiling-start-delay <num>``", "Profiling Start delay (in milliseconds). Profiling will start after given delay period has elapsed", ""
+      "``--aic-profiling-num-samples <num>``", "Profiling Num Samples to save to file", "1"
+      "``--aic-profiling-format <level>``", "Deprecated", "DEF"
+      "``--aic-profiling-type <type>``", "Profiling Type, 'stats'\|'trace'\|'latency' for legacy profiling and 'trace_stream' \| 'latency_stream' for stream profiling. Set multiple times for multiple formats", "none"
+      "``--aic-profiling-duration <num>``", "Profiling duration to run profiling for (in ms). After starting profiling, it will stop at the expiry of profiling duration", ""
+      "``--aic-profiling-sampling-rate <num>``", "Profiling sampling rate [full/half/fourth/eighth/sixteenth]. Programs will generate profiling samples at the requested rate. To profile all samples select full, for every second sample select half and so on", "full"
+      "``--aic-profiling-reporting-rate <num>``", "Profiling report generation rate (in ms) [500/1000/2000/4000]. Profiling report will be generated at every requested interval for profiling duration", "500"
+      "``--aic-profiling-out-dir <path>``", "Location to save files, dir should exist and be writable", "'.'"
+      "``--write-output-start-iter <num>``", "Write outputs start iteration", "0"
+      "``--write-output-num-samples <num>``", "Number of outputs to write", "1"
+      "``--write-output-dir <path>``", "Location to save output files, dir should exist and be writable", "'.'"
+      "``--aic-lib-path DEPRECATED``", "Deprecated, please set env variable QAIC_LIB to the full path of the custom library, by default loads libQAic.so from install location", ""
+      "``--aic-batch-input-directory``", "Batch mode: process all files from input directory. Only the networks with single input file are currently supported", "DEF"
+      "``--aic-batch-input-file-list``", "Batch mode: Specify an input file containing comma-separated absolute path for buffers. Each line is 1 inference and must have number and size of buffers required by program", "DEF"
+      "``--aic-batch-max-memory <mb>``", "Batch mode: Limit memory usage when loading files, provide parameter in Mb", "1024"
+      "``--submit-timeout <num>``", "Time to wait for an inference request completion on kernel. default 0 ms. When 0, kernel defaults to 5000ms", ""
+      "``--submit-retry-count <num>``", "Number of wait-call retries when an inference request times out.", "5"
+      "``--unbound-random``", "When populating random values in buffer, do not consider input buffer format and fill each byte with random input between 0 to 255. This can result in unexpected behavior from certain network.", ""
+      "``--dump-input-buffers``", "Dump input buffers used in benchmarking mode", ""
+      "``-S, --set-size <num>``", "Set Size for inference loop execution, min:1", "10"
+      "``-T, --aic-threads-per-queue``", "Number of threads per queue", "4"
+      "``--auto-batch-input``", "Automatically batch inputs to meet batchsize requirements of network. Inputs should be for Batch size 1", "1"
+      "``-p, --pre-post-processing``", "Pre-post processing [on\|off]", "on"
+      "``-v, --verbose``", "Verbose log from program", ""
+      "``-h, --help``", "help", ""
+
+See :doc:`QAic runner <../../SDK-Tools/shared/qaic_runner>` for more examples and a complete list of ``qaic-runner`` arguments.
+
+.. _reference-to-inference-profiling:
+
+Profile inference time
+***********************
+
+Cloud AI supports both system and device level profiling to help you identify performance bottlenecks. You can do system profiling without any changes to the QPC while device profiling requires that you recompile the model.
+
+Profile the system
+====================
+
+System level profiling includes the breakdown of the inference time
+between application, linux runtime, kernel mode driver and device
+processing. This profiling can provide insights into the inference time spent on
+the host vs. device per inference. You can optimize your
+application or the model with this information.
+
+See the `Profiler notebook <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials/NLP/Profiler-Intermediate>`__ for an example of the complete system-level profiling workflow using qaic-runner.
+
+Profiling using the :ref:`Python APIs <reference-to-python-api>` is also supported. 
+
+Profile the device
+===================
+
+Device level profiling identifies bottlenecks in the inference execution on the device. This profiling requires
+a good understanding of the AI core and SoC architecture. There are three
+key features that would be interesting to developers:
+
+-  Memory metrics: Provides a compiler estimate of the usage of
+   on-board DDR vs. VTCM (vector tightly coupled memory) for a model.
+
+-  Summary view: Provides a histogram of the operations, total
+   time taken by every operation, where the operands are stored (DDR vs
+   VTCM), effective usage of the individual IP blocks in the AI cores. Use for debug only because it can impact performance based on the size of the model.
+
+-  Timeline view: Provides a timeline view of all the operations
+   executing across all IP blocks from start of an inference till the
+   end. Used primarily to zoom into the operations to
+   understand bottlenecks.
+
+See the `Profiler notebooks <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials/NLP/Profiler-Intermediate>`__ for an example of the complete device level profiling workflow for a model using
+qaic-compile and qaic-runner.
+
+.. _run-multiple-models:
+
+Running multiple models
+************************
+
+If you are running multiple models one the same hardware, use ``qaic-program-group-app`` to configure how they share NSP resources.
+
+.. include:: ../../SDK-Tools/shared/qaic_oversubscription.rst
+
+
+.. _model-execution-next-steps:
+
+Next steps
+**********
+
+* To use Python APIs to execute QPC and run inference, see :ref:`Python API <reference-to-python-api>`.
+
+* To use C++ APIs to execute QPC and run inference, see :ref:`C++ API <reference-to-cpp-api>`.
+
+* To use ONNX Runtime to execute QPC and run inference, see :doc:`using Qualcomm Cloud AI 100 as execution provider in ONNX Runtime </onnxrt-qaic/onnxruntime/index>`.
+
+
+.. 
+   Refer to the following sections for details on QPC binary execution:
+
+  * :ref:`reference-to-inference-profiling`
+  * :ref:`reference-to-onnxrt-api`
+  * :ref:`Triton inference server <reference-to-Triton-Inference-Server>`
+  * :ref:`vLLM <reference_to_vllm>`
+  * :ref:`Text Generation Inference <reference_to_text_generation_inference>`
+
+

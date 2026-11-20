@@ -1,0 +1,247 @@
+AICMI (AICM CLI)
+================
+
+.. raw:: html
+
+   <span id="overview"></span>
+
+.. raw:: html
+
+   <span id="id1"></span>
+
+``aicmi`` is an interactive terminal client that wraps all AICM REST APIs.
+AICM must be running before starting ``aicmi``.
+
+.. raw:: html
+
+   <span id="usage"></span>
+
+Starting aicmi
+^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   python aicmi.py [--ip IP] [--port PORT] [--username USERNAME] [--password PASSWORD]
+
+If ``--username`` and ``--password`` are omitted you will be prompted on start.
+
+.. code-block:: bash
+
+   $ python aicmi.py
+   Welcome to AICM!
+
+   Username: admin
+   Password:
+
+   Documented commands (type help <topic>):
+   ========================================
+   exit  group  health  help  list  policy
+
+.. raw:: html
+
+   <span id="command-options"></span>
+
+.. raw:: html
+
+   <span id="list-command"></span>
+
+.. raw:: html
+
+   <span id="exit-command"></span>
+
+Top-level Commands
+^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Command
+     - Description
+   * - ``health``
+     - Fetch and display device health metrics.
+   * - ``group``
+     - List, create, modify, or delete device groups.
+   * - ``policy``
+     - List, create, modify, or delete policies.
+   * - ``list``
+     - List all AIC100 devices on the target system.
+   * - ``help``
+     - Show available commands or detail on a specific command.
+   * - ``exit``
+     - Leave ``aicmi``.
+
+.. raw:: html
+
+   <span id="help"></span>
+
+.. raw:: html
+
+   <span id="additional-help"></span>
+
+Use ``help <command>`` for a brief description, or ``<command> --help`` for
+full flag reference.
+
+.. raw:: html
+
+   <span id="subcommands"></span>
+
+.. raw:: html
+
+   <span id="health-commands"></span>
+
+.. raw:: html
+
+   <span id="health"></span>
+
+Health Subcommand
+^^^^^^^^^^^^^^^^^
+
+Options:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Flag
+     - Description
+   * - ``-p``, ``--pcie``
+     - Fetch PCIe throughput metrics.
+   * - ``-r``, ``--ras-error``
+     - Fetch RAS error metrics.
+   * - ``--ddr-bw``
+     - Fetch DDR bandwidth metrics.
+   * - ``-dev DEV_ID``, ``--device-id DEV_ID``
+     - Target a single device (integer).
+   * - ``-g GROUP_ID``, ``--group GROUP_ID``
+     - Target a group (string).
+
+.. raw:: html
+
+   <span id="example-usage"></span>
+
+Examples:
+
+.. code-block:: sh
+
+   health                   # all devices, health data
+   health -dev 0            # device 0 only
+   health -g my_group       # target a group
+   health -p                # PCIe metrics, all devices
+   health -r -dev 0         # RAS errors, device 0
+   health --ddr-bw -g rack1 # DDR bandwidth for group rack1
+
+.. raw:: html
+
+   <span id="group-commands"></span>
+
+.. raw:: html
+
+   <span id="group"></span>
+
+Group Subcommand
+^^^^^^^^^^^^^^^^
+
+.. raw:: html
+
+   <span id="command-options-1"></span>
+
+Options:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Flag
+     - Description
+   * - ``-c GROUP_ID``, ``--create GROUP_ID``
+     - Create a new group.
+   * - ``-d GROUP_ID``, ``--delete GROUP_ID``
+     - Delete a group.
+   * - ``-e GROUP_ID``, ``--empty GROUP_ID``
+     - Remove all devices from a group.
+   * - ``-a GROUP_ID``, ``--add GROUP_ID``
+     - Add one or more devices to a group (use with ``-dev``).
+   * - ``-r GROUP_ID``, ``--remove GROUP_ID``
+     - Remove one or more devices from a group (use with ``-dev``).
+   * - ``-l GROUP_ID``, ``--list GROUP_ID``
+     - List devices in a group.
+   * - ``-dev DEV_ID [DEV_ID ...]``, ``--device-id``
+     - Target device ID(s) (integers, space-separated).
+
+Examples:
+
+.. raw:: html
+
+   <span id="example-usage-1"></span>
+
+.. code-block:: sh
+
+   group                        # list all groups
+   group -c rack1               # create group "rack1"
+   group -a rack1 -dev 0 1 2   # add devices 0, 1, 2 to rack1
+   group -r rack1 -dev 2        # remove device 2 from rack1
+   group -l rack1               # list devices in rack1
+   group -e rack1               # remove all devices from rack1
+   group -d rack1               # delete group rack1
+
+.. raw:: html
+
+   <span id="policy-commands"></span>
+
+.. raw:: html
+
+   <span id="policy"></span>
+
+Policy Subcommand
+^^^^^^^^^^^^^^^^^
+
+.. raw:: html
+
+   <span id="command-options-2"></span>
+
+Options:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Flag
+     - Description
+   * - ``-c POLICY_ID``, ``--create POLICY_ID``
+     - Create a new policy.
+   * - ``-d POLICY_ID``, ``--delete POLICY_ID``
+     - Delete a policy.
+   * - ``-m POLICY_ID``, ``--modify POLICY_ID``
+     - Modify an existing policy.
+   * - ``-cid CONDITION_ID``, ``--condition-id``
+     - Condition: ``temperature_violation``, ``power_violation``,
+       or ``DDR_pages_retirement_violation``.
+   * - ``-aid ACTION_ID``, ``--action-id``
+     - Action: ``alert``.
+   * - ``-i ITEM [ITEM ...]``, ``--items``
+     - Device IDs (int) and/or group IDs (string), space-separated.
+   * - ``-dur SECONDS``, ``--duration``
+     - Evaluation window: ``10``, ``30``, ``60``, ``300``, ``600``.
+   * - ``-agg TYPE``, ``--aggregation-type``
+     - Aggregation: ``min``, ``max``, ``avg``.
+   * - ``-comp OP``, ``--comparison-operator``
+     - Operator: ``greater``, ``greater_or_equal``, ``less``,
+       ``less_or_equal``.
+   * - ``-thres VALUE``, ``--threshold``
+     - Threshold value (float).
+
+Examples:
+
+.. raw:: html
+
+   <span id="example-usage-2"></span>
+
+.. code-block:: sh
+
+   policy                                                     # list all policies
+   policy -c p1 -cid power_violation -aid alert -i 0 \
+          -dur 10 -agg avg -comp greater -thres 10            # create policy
+   policy -m p1 -cid temperature_violation -thres 42          # modify policy
+   policy -d p1                                               # delete policy
+

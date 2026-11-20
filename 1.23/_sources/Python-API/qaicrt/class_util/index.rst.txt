@@ -1,0 +1,246 @@
+.. _reference-to-python-api-class-util:
+
+Class ``Util``
+================
+
+Use ``Util`` to get information on the AIC device. The ``Util`` class supports basic
+operations on the device such as getting the device ID, device information, and
+resource information.
+
+The devices visible to these APIs can be controlled by the ``QAIC_VISIBLE_DEVICES`` environment variable. See :ref:`Device Visibility <reference-to-qaic-visible-devices>` for more details.
+
+**Util()**\ 
+------------
+
+``Util() -> util``
+
+Creates and returns a new util object.
+
+
+``init``
+^^^^^^^^^^
+
+::
+
+    __init__(self: qaicrt.Util) -> None
+
+``checkLibraryVersion``
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Checks Library Version with AicApi header.
+
+-  Major library version should be equal to *LRT\_LIB\_MAJOR\_VERSION*.
+-  Minor library version should be less than *LRT\_LIB\_MINOR\_VERSION*.
+
+::
+
+    checkLibraryVersion(self: qaicrt.Util) -> qaicrt.QStatus
+
+
+Returns
+"""""""""
+
+-  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+-  ``qaicrt.QStatus.QS_ERROR`` Driver init failed
+
+``getAicVersion``
+^^^^^^^^^^^^^^^^^
+
+Gets Aic version of the library.
+
+::
+
+    getAicVersion(self: qaicrt.Util) -> Tuple[qaicrt.QStatus, int, int, str, str]
+
+
+Returns
+""""""""" 
+
+Tuple of operational status, major, minor, patch, and variant.
+
+-  Operational status:
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_INVAL`` Internal error in getting aic version
+
+-  major: Major version of the library
+-  minor: Minor version of the library
+-  patch: Patch being used by the library
+-  variant: Variant of the library being used
+
+``getDeviceIds``
+^^^^^^^^^^^^^^^^^
+
+Get the list of AIC devices. Optional argument deviceType specifies the
+type of the device.
+
+::
+
+    getDeviceIds(self: qaicrt.Util, deviceType: qaicrt.QAicDeviceType = <QAicDeviceType.QAIC_DEVICE_TYPE_DEFAULT: 1>) -> Tuple[qaicrt.QStatus, qaicrt.QIDList]
+
+Parameters
+"""""""""""
+
++------------------+-----------------------------+
+| Parameter        | Description                 |
++==================+=============================+
+| ``deviceType``   | [Optional] Type of device   |
++------------------+-----------------------------+
+
+Returns
+"""""""""
+
+Tuple of operational status and the list of AIC devices.
+
+-  Operational status:
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_INVAL`` Internal error in getting device list
+   -  ``qaicrt.QStatus.QS_NODEV`` No valid device
+   -  ``qaicrt.QStatus.QS_ERROR`` Driver init failed or Bad device
+      AddrInfo
+
+``getDeviceInfo``
+^^^^^^^^^^^^^^^^^^
+
+Get device information for the device specified.
+
+::
+
+    getDeviceInfo(self: qaicrt.Util, devID: int) -> Tuple[qaicrt.QStatus, qaicrt.QDevInfo]
+
+
+Parameters
+"""""""""""
+
++-------------+--------------------------------------------------+
+| Parameter   | Description                                      |
++=============+==================================================+
+| ``devID``   | A valid device ID returned from getDeviceIds()   |
++-------------+--------------------------------------------------+
+
+Returns
+"""""""""
+
+Tuple of operational status and device information.
+
+-  Operational status:
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_INVAL`` Internal error in getting device information
+   -  ``qaicrt.QStatus.QS_NODEV`` No valid device
+   -  ``qaicrt.QStatus.QS_ERROR`` Driver init failed
+   -  ``qaicrt.QStatus.QS_AGAIN`` Error on reload device ID
+
+``getPerformanceInfo``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Get device performance information, this is a simple query that returns
+performance information. The same information is available through
+GetDeviceInfo, however getPerformanceInfo is more lightweight because it only
+retrieves the performance information.
+
+::
+
+    getPerformanceInfo(self: qaicrt.Util, devID: int) -> Tuple[qaicrt.QStatus, qaicrt.QPerformanceInfo]
+
+
+Parameters
+"""""""""""
+
++-------------+--------------------------------------------------+
+| Parameter   | Description                                      |
++=============+==================================================+
+| ``devID``   | A valid device ID returned from getDeviceIds()   |
++-------------+--------------------------------------------------+
+
+Returns
+"""""""""
+
+Tuple of operational status and performance information.
+
+-  Operational status:
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_INVAL`` Internal error in getting performance
+      information
+   -  ``qaicrt.QStatus.QS_NODEV`` Device not found, the device ID
+      provided isn't available
+   -  ``qaicrt.QStatus.QS_ERROR`` Driver init failed
+   -  ``qaicrt.QStatus.QS_DEV_ERROR`` Device validity error
+
+``getResourceInfo``
+^^^^^^^^^^^^^^^^^^^^^
+
+Gets device resource information. This is a simple query that returns the
+status of dynamic resources such as free memory. The same
+information is available through GetDeviceInfo, however getResourceInfo is more
+lightweight because it only retrieves the resource information.
+
+::
+
+    getResourceInfo(self: qaicrt.Util, devID: int) -> Tuple[qaicrt.QStatus, qaicrt.QResourceInfo]
+
+Parameters
+"""""""""""
+
++-------------+--------------------------------------------------+
+| Parameter   | Description                                      |
++=============+==================================================+
+| ``devID``   | A valid device ID returned from getDeviceIds()   |
++-------------+--------------------------------------------------+
+
+Returns
+"""""""""
+
+Tuple of operational status and resource information.
+
+-  Operational status:
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_INVAL`` Internal error in getting resource
+      information
+   -  ``qaicrt.QStatus.QS_NODEV`` Device not found, the device ID
+      provided isn't available
+   -  ``qaicrt.QStatus.QS_ERROR`` Driver init failed
+   -  ``qaicrt.QStatus.QS_DEV_ERROR`` Device validity error
+
+``lockDevice``
+^^^^^^^^^^^^^^^^^
+
+Lock a device for exclusive access. This is an advisory lock, so if an
+uncooperative app accesses a locked device the operations aren't
+blocked. This functionality is enabled by setting environmental variable
+``QAIC\_SERIALIZE\_DEVICE`` to 1. If the environmental variable is unset, the call
+returns ``QS\_UNSUPPORTED``.
+
+::
+
+    lockDevice(self: qaicrt.Util, devID: int, lock: bool, block: bool) -> qaicrt.QStatus
+
+Parameters
+"""""""""""
+
++-------------+-----------------------------------------------------+
+| Parameter   | Description                                         |
++=============+=====================================================+
+| ``devID``   | A valid device ID returned from getDeviceIds()      |
++-------------+-----------------------------------------------------+
+| ``lock``    | locks or unlocks the device                         |
++-------------+-----------------------------------------------------+
+| ``block``   | Blocking or non-blocking. No-op if lock is false.   |
++-------------+-----------------------------------------------------+
+
+Returns
+"""""""""
+
+Operational status.
+
+-  Operational status
+
+   -  ``qaicrt.QStatus.QS_SUCCESS`` Successful completion
+   -  ``qaicrt.QStatus.QS_NODEV`` Device not found
+   -  ``qaicrt.QStatus.QS_ERROR`` Driver init failed
+   -  ``qaicrt.QStatus.QS_UNSUPPORTED`` Environmental variable for advisory lock not
+      set
+   -  ``qaicrt.QStatus.QS_BUSY`` Device locked

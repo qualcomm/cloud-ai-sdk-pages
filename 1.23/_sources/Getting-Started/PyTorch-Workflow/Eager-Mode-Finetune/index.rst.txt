@@ -1,0 +1,217 @@
+PyTorch workflow
+================
+
+.. _pytorch-workflow:
+
+This page describes running PyTorch workloads on Cloud AI accelerators: eager-mode execution, ``torch.compile`` backends, custom operators, vLLM integration, and fine-tuning.
+
+Eager mode
+----------
+
+Qualcomm Cloud AI accelerators support native PyTorch eager-mode execution through the ``torch_qaic`` package. ``torch-qaic`` is the distribution name and ``torch_qaic`` is the import name for the same package: a custom PyTorch backend that exposes Cloud AI accelerators as standard PyTorch devices.
+
+Developers can run unmodified PyTorch models directly on Cloud AI hardware without generating QPC binaries beforehand. By removing the ahead-of-time (AoT) compilation requirement, eager mode streamlines the development process and enables faster prototyping, easier debugging, rapid experimentation, and quicker iteration cycles.
+
+Eager mode trades peak performance for this flexibility: it skips the graph-level optimizations of a compiled QPC, so expect lower throughput than the same model built with ``qaic-compile``. For production deployment, use the :ref:`Inference Workflow <reference-to-inference-workflow>` to compile the model to a QPC.
+
+.. image:: ../../../images/pytorch-stack.png
+
+-  The ``torch_qaic`` Python package lists operators supported by Cloud
+   AI accelerators.
+-  ``torch_qaic`` registers the accelerator with PyTorch.
+-  The JIT runtime enables running operators on Cloud AI hardware.
+-  The operator library is pre-coded and supports multiple neural signal processors (NSPs).
+
+Container setup
+---------------
+
+The eager mode runtime ships in the Cloud AI inference container. Pull the container, start it with device access, and activate the ``torch-qaic`` environment:
+
+.. code-block:: bash
+
+    # Pull the Docker container
+    docker pull ghcr.io/qualcomm/cloud_ai_inference_ubuntu26:1.23.2.0
+
+    # Start the container with device access
+    docker run -it --rm --privileged \
+      --device=/dev/accel/ \
+      ghcr.io/qualcomm/cloud_ai_inference_ubuntu26:1.23.2.0 \
+      /bin/bash
+
+    # Activate the torch-qaic environment
+    source /opt/torch-qaic-env/bin/activate
+
+Verify the setup. The following command prints the number of Cloud AI SoC devices available to PyTorch, which depends on the installed cards:
+
+.. code-block:: bash
+
+    python3 -c "import torch; print(f'Devices: {torch.qaic.device_count()}')"
+
+.. note::
+   Eager mode requires an x86 host. The container's ``torch-qaic`` environment uses Python 3.12 and a CPU-only PyTorch build. The preferred datatypes for Cloud AI 100 devices are ``torch.float16`` and ``torch.int8``. ``torch.float32`` is not hardware accelerated, and ``torch.int64`` is computed as Int32.
+
+Sample usage
+------------
+
+Run Llama-3.1-8B in eager mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    MODEL_NAME = "meta-llama/Llama-3.1-8B"
+    DEVICE = "qaic:0"
+    PROMPT = "San Diego is"
+    MAX_NEW_TOKENS = 50
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, dtype=torch.float16).eval()
+
+    model = model.to(DEVICE)
+    inputs = tokenizer(PROMPT, return_tensors="pt").to(DEVICE)
+
+    with torch.no_grad():
+        gen = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+
+    print(tokenizer.decode(gen[0].cpu().tolist(), skip_special_tokens=True))
+
+torch.compile support
+---------------------
+
+PyTorch 2.0+ ``torch.compile`` optimizes models by compiling operations into fused kernels.
+``torch.compile`` accelerates inference on Cloud AI devices by capturing computation graphs on the first call
+and replaying them on subsequent calls with the same input shapes. Use the ``backend`` parameter
+to specify a compilation strategy:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Backend
+     - Best for
+     - Behavior
+   * - ``qaic-inference`` (default)
+     - Single generation call, one-shot classification
+     - Consistent latency, no compilation overhead
+   * - ``qaic-graphs``
+     - Batch processing, multi-turn chat, repeated inference with identical input shapes
+     - Captures a graph on the first call and replays it on later calls, 40-50x faster on calls 2 and later
+   * - ``qaic-interpreter``
+     - Debugging and development
+     - No compilation, direct execution
+
+Example: Using the qaic-graphs backend
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    import torch
+    import torch.nn as nn
+
+    class MLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.l1 = nn.Linear(128, 256)
+            self.l2 = nn.Linear(256, 128)
+
+        def forward(self, x):
+            return self.l2(torch.relu(self.l1(x)))
+
+    model = MLP().to("qaic:0", dtype=torch.float16)
+    compiled = torch.compile(model, backend="qaic-graphs")
+
+    x = torch.randn((4, 128), device="qaic:0", dtype=torch.float16)
+
+    out1 = compiled(x)  # Call 1: captures graph (~20ms)
+    out2 = compiled(x)  # Call 2: replays graph (~0.5ms, ~40x faster)
+    out3 = compiled(x)  # Call 3: replays graph (~0.5ms, ~40x faster)
+
+Custom operators
+----------------
+
+``torch_qaic`` supports custom operations with hand-optimized Hexagon kernels for maximum performance. Users can generate their own operators and compile kernels targeting Cloud AI hardware:
+
+- **HVX (Hexagon Vector Extensions)**: Element-wise and general-purpose vector operations
+- **HMX (Hexagon Matrix Extensions)**: Matrix and tensor computations
+
+Two ready-to-use examples are included: **muladd** (HVX) and **matmul** (HMX).
+
+Build the example kernels
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Inside the container from the Container setup section, activate the ``torch-qaic`` environment, then build both example kernels:
+
+.. code-block:: bash
+
+    # Activate environment
+    source /opt/torch-qaic-env/bin/activate
+
+    # Build muladd (HVX kernel)
+    cd /opt/qti-aic/examples/apps/qaic-ml/torch/custom_ops/muladd
+    python3 setup.py build
+    python3 setup.py install
+
+    # Build matmul (HMX kernel)
+    cd ../matmul
+    python3 setup.py build
+    python3 setup.py install
+
+How kernels are generated
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both examples follow the same build flow. For muladd (HVX):
+
+.. code-block::
+
+    /opt/qti-aic/examples/apps/qaic-ml/torch/custom_ops/muladd/
+    ├── muladd_ext/
+    │   ├── __init__.py           ← Registers operation
+    │   └── csrc/qaic/kernel.cpp  ← HVX source code
+    ├── setup.py                  ← Build config
+    └── [python3 setup.py build && python3 setup.py install]
+           ↓
+        hexagon-clang++ compiles kernel.cpp
+           ↓
+        build/lib.../hexagon_kernels.so  ← Compiled kernel
+           ↓
+        from muladd_ext import muladd  ✓
+
+The matmul (HMX) example has the same layout with ``matmul_ext`` and an HMX kernel source.
+
+Use the kernels
+~~~~~~~~~~~~~~~
+
+**muladd: (a * b) + c**
+
+.. code-block:: python
+
+    import torch
+    from muladd_ext import muladd
+
+    a = torch.randn((128, 256), device="qaic:0")
+    result = muladd(a, a, 1.5)
+
+**matmul: a @ b**
+
+.. code-block:: python
+
+    import torch
+    from matmul_ext import matmul
+
+    x = torch.randn((64, 128), device="qaic:0", dtype=torch.float16)
+    w = torch.randn((128, 256), device="qaic:0", dtype=torch.float16)
+    result = matmul(x, w)
+
+vllm-qaic
+---------
+
+The ``vllm-qaic`` plugin supports **PyT (PyTorch eager) mode** (experimental), which runs vLLM models through PyTorch and ``torch_qaic`` without a compilation step. For more details, see :doc:`vLLM Execution Modes </Getting-Started/Model-Serving/vLLM-Serving/Execution-Modes>`.
+
+Fine-tuning
+-----------
+
+PyTorch fine-tuning workflows run on Cloud AI devices through eager mode, using the same training code you run on any other PyTorch device.
+
+For ready-made fine-tuning recipes, the `Qualcomm Efficient-Transformers library <https://qualcomm.github.io/efficient-transformers/source/release_docs.html>`_ provides the infrastructure for fine-tuning models, including low-rank adaptation (LoRA) for supported large language models (LLMs). See `Finetune Infra <https://qualcomm.github.io/efficient-transformers/source/finetune.html>`__ for details.
+

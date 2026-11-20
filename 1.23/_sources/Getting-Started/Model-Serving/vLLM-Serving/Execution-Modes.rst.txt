@@ -1,0 +1,196 @@
+.. _reference_to_vllm_execution_modes:
+
+Execution Modes (AoT and PyT)
+=============================
+
+The vLLM QAIC plugin (``vllm-qaic``) runs models on Qualcomm Cloud AI
+accelerators in one of two execution modes:
+
+- **AoT (Ahead-of-Time) mode** - the default, production mode. Models are
+  exported and compiled by QEfficient and the Apps SDK into a Qualcomm Program
+  Container (QPC), which the plugin runs on the device.
+- **PyT (PyTorch eager) mode** - experimental. vLLM model definitions run
+  directly in PyTorch, and ``torch_qaic`` dispatches the operators to the
+  device. No export or compilation step is required.
+
+.. figure:: vllm_architecture.svg
+   :alt: vLLM + Qualcomm Cloud AI architecture with AoT and PyT execution modes
+   :align: center
+   :width: 700
+
+   AoT mode compiles models to a QPC; PyT mode runs vLLM models through PyTorch and torch_qaic.
+
+Comparing the modes
+-------------------
+
+.. list-table::
+   :widths: 22 39 39
+   :header-rows: 1
+
+   * - Aspect
+     - AoT mode
+     - PyT mode (experimental)
+   * - Model source
+     - Hugging Face models
+     - vLLM model implementations (selected models)
+   * - Model transformation
+     - QEfficient (ONNX export and quantization)
+     - None - vLLM / vllm-qaic model code
+   * - Compilation
+     - ``qaic-compile`` produces a QPC, cached for reuse
+     - None - eager ATen operators or ``torch.compile``
+   * - Kernels
+     - Hardware-native kernels in the QPC
+     - ``torch_qaic`` operator library and vLLM fused kernels (RMSNorm,
+       TopK Softmax, Grouped TopK, TopK Sigmoid)
+   * - Startup
+     - First run includes export and compilation
+     - Immediate - no compilation step
+   * - Quantization
+     - MXFP6 weights, MXINT8 KV cache
+     - Not supported (FP16)
+   * - Features
+     - Full feature set (see :doc:`features`)
+     - Selected vision-language models only
+   * - Best for
+     - Production serving
+     - Development, experimentation, and new model bring-up
+
+How the mode is selected
+------------------------
+
+There is no mode flag. The plugin selects the mode at startup based on the
+Python environment:
+
+- If ``torch_qaic`` is **not** installed, the plugin runs in AoT mode.
+- If ``torch_qaic`` is installed, the plugin runs in PyT mode.
+
+Because the two modes need different PyTorch versions, install each mode in its
+own Python virtual environment. They can't share an environment. See
+:doc:`build-x86` for installation steps for both modes.
+
+About torch_qaic
+----------------
+
+``torch_qaic`` is an out-of-tree PyTorch backend for Qualcomm Cloud AI
+accelerators. It registers the accelerator with PyTorch as the ``qaic`` device
+and runs PyTorch operators on the device through a just-in-time (JIT) runtime
+and a prebuilt operator library.
+
+``torch_qaic`` ships with the Apps SDK. The installer places ``torch_qaic``
+wheels for each supported Python version under
+``/opt/qti-aic/integrations/torch_qaic/py<version>/`` (for example,
+``py312``).
+
+PyT mode software versions
+--------------------------
+
+.. list-table::
+   :widths: 40 60
+   :header-rows: 1
+
+   * - Component
+     - Version
+   * - vLLM
+     - 0.23.0
+   * - torch
+     - 2.13.0+cpu
+   * - torchvision
+     - 0.28.0+cpu
+   * - torchaudio
+     - 2.11.0+cpu
+   * - torch_qaic
+     - 0.1.0
+   * - Python
+     - 3.12
+
+``torch_qaic`` requires the CPU build of PyTorch. It fails at import time if a
+CUDA build of PyTorch is installed.
+
+Running in PyT mode
+-------------------
+
+PyT mode requires these engine arguments:
+
+- ``enforce_eager=True`` - if this isn't set, the plugin sets it automatically and logs a warning.
+- ``async_scheduling=False``
+
+``gpu_memory_utilization`` sets the fraction of device memory used for the KV
+cache. It applies only in PyT mode; AoT mode sizes memory from the QPC.
+
+Set ``QAIC_VISIBLE_DEVICES`` before importing vLLM. Importing PyTorch
+autoloads ``torch_qaic``, which reads this variable to enumerate devices.
+
+Offline inference example
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import os
+
+   os.environ.setdefault("QAIC_VISIBLE_DEVICES", "0")
+
+   from vllm import LLM, SamplingParams
+
+   llm = LLM(
+       model="Qwen/Qwen2.5-VL-7B-Instruct",
+       max_num_seqs=4,
+       max_model_len=4096,
+       gpu_memory_utilization=0.9,
+       enforce_eager=True,
+       async_scheduling=False,
+   )
+
+The ``vllm-qaic`` repository includes PyT mode examples:
+
+- ``examples/qaic_eager_mode.py`` - basic offline text generation.
+- ``examples/qaic_eager_mode_vision_language.py`` - image and video
+  inputs for vision-language models.
+
+.. code-block:: bash
+
+   python examples/qaic_eager_mode_vision_language.py \
+       --model-type qwen2_5_vl \
+       --tp-size 1 \
+       --image-path /path/to/image.jpg \
+       --question "Describe the image."
+
+Online serving
+~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   export QAIC_VISIBLE_DEVICES=0,1,2,3
+
+   vllm serve Qwen/Qwen3-VL-32B-Instruct \
+       --host 0.0.0.0 \
+       --port 8000 \
+       --tensor-parallel-size 4 \
+       --max-num-seqs 4 \
+       --max-model-len 4096 \
+       --gpu-memory-utilization 0.9 \
+       --enforce-eager \
+       --no-async-scheduling
+
+PyT mode supported models
+-------------------------
+
+See the PyT mode section of :doc:`supported-models`.
+
+PyT mode limitations
+--------------------
+
+PyT mode is experimental. These features are supported in AoT mode only:
+
+- :doc:`Speculative decoding <Speculative-Decoding>`
+- :doc:`LoRAX <LoRAX>`
+- :doc:`Disaggregated serving <Disaggregated-Serving>`
+- :doc:`Quantization <Quantized-model>` (MXFP6 and MXINT8)
+- :doc:`Compute Context Length (CCL) <CCL>`
+- :doc:`On-device sampling <On-Device-Sampling>`
+- :doc:`Prefix caching <Prefix-Caching>`
+
+In addition:
+
+- Text-only LLMs aren't validated in PyT mode.
+- ``best_of > 1`` and beam search aren't supported.

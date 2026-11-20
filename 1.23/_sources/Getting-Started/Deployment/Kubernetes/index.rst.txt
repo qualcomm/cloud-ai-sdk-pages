@@ -1,0 +1,321 @@
+.. _reference_to_kubernetes:
+
+Kubernetes
+==========
+
+You can use `Kubernetes <https://kubernetes.io/docs/home/>`__ to deploy Docker-containerized AI applications built for the Cloud AI 100 inference accelerator.
+
+For production LLM serving on Kubernetes with disaggregated prefill/decode and autoscaling,
+see :doc:`llm-d/index`.
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   llm-d/index
+
+The following figure shows a sample Kubernetes deployment.
+
+.. image:: ./Kubernetes_cluster.png
+
+.. tip::
+
+   Use the `cloud_ai_inference_ubuntu26 Docker image <https://github.com/qualcomm/cloud-ai-containers/pkgs/container/cloud_ai_inference_ubuntu26>`__
+   to quickly containerize your Cloud AI workload.
+
+Prerequisites
+-------------
+
+- Install Platform SDK on the Kubernetes worker node (required for QAic Linux kernel drivers and firmware images).
+
+- Cloud AI devices available on the worker node.
+
+- QAic K8s Device Plugin Docker image available through a local Docker registry or preloaded on the Kubernetes worker node.
+
+- Cloud AI workload Docker image available through a local Docker registry or preloaded on the Kubernetes worker node.
+
+.. note::
+
+   To serve models as a Kubernetes-native InferenceService
+   using KServe, see :doc:`vLLM deployment using KServe <../../Model-Serving/vLLM-Serving/Kserve>`.
+   KServe requires a functioning Kubernetes environment as described on this page.
+
+QAic K8s Device Plugin
+----------------------
+
+The QAic K8s device plugin runs as a DaemonSet on every QAIC-equipped worker node and
+exposes Cloud AI device resources to containerized workloads under the
+``qualcomm.com/qaic`` resource name. It supports:
+
+- Reporting the number of QAic devices on each cluster node
+- Monitoring QAic device health status
+- QAic device allocation and cleanup
+
+Download the plugin from the `Cloud AI Containers <https://github.com/qualcomm/cloud-ai-containers/pkgs/container/cloud_ai_k8s_device_plugin>`__ repository:
+
+.. code:: bash
+
+   docker pull ghcr.io/qualcomm/cloud_ai_k8s_device_plugin:1.23.2.0
+
+Package Contents
+----------------
+
+The plugin source is available in the Cloud AI Apps SDK installer: ``qaic-apps-1.x.y.z/common/tools/k8s-device-plugin``.
+
+-  Plugin source
+
+-  Docker image build script
+
+-  Deployment scripts (YAML)
+
+   -  Device Plugin Deployment Script (deploys Qaic K8s Device Plugin as
+      DaemonSet)
+   -  Sample Cloud AI Workload Deployment Script
+
+Node Labeling
+-------------
+
+Label every QAIC-equipped worker node. Workload pods use a ``nodeSelector`` targeting
+this label to ensure they only schedule onto nodes with physical QAIC devices. The
+device plugin itself uses broad tolerations and runs on all nodes regardless of labels:
+
+.. code:: bash
+
+   kubectl label node <worker-hostname> workload=qaic-worker
+
+   # Verify
+   kubectl get nodes -l workload=qaic-worker
+
+Device Plugin Deployment
+------------------------
+
+Apply the full DaemonSet manifest. The four volume mounts below are all required —
+missing any one of them causes the plugin to fail silently or report
+``Failed to enumerate QAic devices`` even though it reads the QIDs correctly
+(see Troubleshooting below).
+
+.. code:: yaml
+
+   apiVersion: apps/v1
+   kind: DaemonSet
+   metadata:
+     name: qaic-device-plugin
+     namespace: kube-system
+     labels:
+       app: qaic-device-plugin
+   spec:
+     selector:
+       matchLabels:
+         app: qaic-device-plugin
+     updateStrategy:
+       type: RollingUpdate
+     template:
+       metadata:
+         labels:
+           app: qaic-device-plugin
+       spec:
+         priorityClassName: system-node-critical
+         hostNetwork: true
+         tolerations:
+           - operator: Exists
+             effect: NoSchedule
+           - operator: Exists
+             effect: NoExecute
+         containers:
+           - name: qaic-device-plugin
+             image: ghcr.io/qualcomm/cloud_ai_k8s_device_plugin:1.23.2.0
+             imagePullPolicy: IfNotPresent
+             securityContext:
+               privileged: true
+             resources:
+               requests:
+                 cpu: "50m"
+                 memory: "64Mi"
+               limits:
+                 cpu: "500m"
+                 memory: "256Mi"
+             volumeMounts:
+               - name: device-plugin-socket
+                 mountPath: /var/lib/kubelet/device-plugins
+                 mountPropagation: Bidirectional   # plugin writes its gRPC socket here; kubelet reads it
+               - name: dev-accel
+                 mountPath: /dev/accel              # the QAIC device files the plugin manages and allocates
+               - name: sys
+                 mountPath: /sys
+                 readOnly: true                     # reads PCI topology to understand board grouping
+               - name: udev-run
+                 mountPath: /run/udev
+                 readOnly: true                     # watches for device hotplug events; missing this causes "Failed to enumerate QAic devices"
+         volumes:
+           - name: device-plugin-socket
+             hostPath:
+               path: /var/lib/kubelet/device-plugins
+               type: Directory
+           - name: dev-accel
+             hostPath:
+               path: /dev/accel
+               type: Directory
+           - name: sys
+             hostPath:
+               path: /sys
+               type: Directory
+           - name: udev-run
+             hostPath:
+               path: /run/udev
+               type: Directory
+
+Apply and verify:
+
+.. code:: bash
+
+   kubectl apply -f qaic-device-plugin.yaml
+
+   # Wait for DaemonSet to be ready on all QAIC nodes
+   kubectl rollout status daemonset/qaic-device-plugin -n kube-system
+
+   # Confirm devices are registered — output should show qualcomm.com/qaic capacity
+   kubectl get nodes -o json | jq '.items[].status.capacity | select(.["qualcomm.com/qaic"] != null)'
+
+Device Plugin Configuration
+---------------------------
+
+The following plugin options are available via environment variables:
+
+Allocate by Card Type (``QAIC_SKU_BASED_RESOURCE_ENABLED``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When enabled, devices are registered under ``qualcomm.com/qaic-<sku>`` (``std``,
+``pro``, ``ultra``, ``ultra-plus``) instead of the generic ``qualcomm.com/qaic``:
+
+.. code:: yaml
+
+   env:
+     - name: QAIC_SKU_BASED_RESOURCE_ENABLED
+       value: "1"   # 0 = generic qualcomm.com/qaic (default), 1 = SKU-based
+
+Fractional Allocation (``QAIC_FRACTIONAL_DEVICE_STRATEGY``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: yaml
+
+   env:
+     - name: QAIC_FRACTIONAL_DEVICE_STRATEGY
+       value: "Half"    # or "Quarter"
+
+Deployment Configuration
+------------------------
+
+Persistent Serving (Deployment)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use a ``Deployment`` for long-running serving workloads such as vLLM or Triton. Specify
+``qualcomm.com/qaic`` under ``resources.limits`` — the device plugin injects the
+allocated ``/dev/accel`` device files into the pod automatically.
+
+Containers should run as non-root with the QAIC device group added via
+``supplementalGroups`` so they can access ``/dev/accel`` without requiring ``privileged: true``:
+
+.. code:: yaml
+
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: qaic-serving
+     namespace: <your-namespace>
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: qaic-serving
+     template:
+       metadata:
+         labels:
+           app: qaic-serving
+       spec:
+         nodeSelector:
+           workload: qaic-worker
+         securityContext:
+           runAsUser: 1000
+           runAsGroup: 995          # primary group (qaic)
+           supplementalGroups: [995] # grants /dev/accel access without privileged mode
+         containers:
+           - name: qaic
+             image: ghcr.io/qualcomm/cloud_ai_inference_ubuntu26:1.23.2.0
+             command: ["/bin/bash", "-ce", "tail -f /dev/null"]
+             resources:
+               limits:
+                 qualcomm.com/qaic: 1
+
+Batch Jobs (one-shot workloads)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For one-shot inference or model processing tasks, use a ``batch/v1 Job`` with
+``restartPolicy: Never``. Disable the Istio sidecar to avoid mesh drain delays on
+short-lived pods:
+
+.. code:: yaml
+
+   apiVersion: batch/v1
+   kind: Job
+   metadata:
+     name: qaic-job
+     namespace: <your-namespace>
+   spec:
+     ttlSecondsAfterFinished: 30
+     backoffLimit: 1
+     template:
+       metadata:
+         annotations:
+           sidecar.istio.io/inject: "false"   # skip mesh for batch pods
+       spec:
+         restartPolicy: Never
+         nodeSelector:
+           workload: qaic-worker
+         terminationGracePeriodSeconds: 15
+         securityContext:
+           runAsUser: 1000
+           runAsGroup: 995
+           supplementalGroups: [995]
+         containers:
+           - name: qaic-task
+             image: ghcr.io/qualcomm/cloud_ai_inference_ubuntu26:1.23.2.0
+             resources:
+               limits:
+                 qualcomm.com/qaic: 1
+
+Examples
+--------
+
+- `Installation and Deployment Steps for Kubernetes with Cloud AI 100 <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials/Kubernetes>`__
+
+Troubleshooting
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Symptom
+     - Likely Cause
+     - Fix
+   * - ``Failed to enumerate QAic devices`` in device plugin logs (even after QIDs are listed)
+     - ``/run/udev`` not mounted — udev hotplug watcher fails to initialize. The error fires *after* the plugin reads all QIDs successfully, so the log output is misleading.
+     - Add the ``udev-run`` hostPath volume (``/run/udev``, read only) to the DaemonSet spec. See the Device Plugin Deployment section above for the full required mount list.
+   * - Device plugin pod stays in ``CrashLoopBackOff``
+     - ``/dev/accel`` not present on the node (QAIC drivers not installed)
+     - Verify the Platform SDK and QAIC kernel drivers are installed on the worker node: ``ls /dev/accel/ && qaic-util -q``
+   * - ``qualcomm.com/qaic`` shows 0 capacity on node
+     - Device plugin running but device files not accessible
+     - Check plugin logs: ``kubectl logs -n kube-system daemonset/qaic-device-plugin``. Ensure all four hostPath volumes are mounted correctly.
+   * - Pod stuck ``Pending`` with ``0/N nodes have sufficient qualcomm.com/qaic``
+     - Requested more devices than available, or node not labeled
+     - Verify node label: ``kubectl get nodes -l workload=qaic-worker``. Check allocatable: ``kubectl describe node <worker> | grep qualcomm``
+
+Next steps
+----------
+
+* See :doc:`vLLM deployment using KServe <../../Model-Serving/vLLM-Serving/Kserve>` to serve models as a Kubernetes-native InferenceService using KServe.
+
+* See :ref:`pytorch-workflow` for more information about PyTorch eager mode execution and fine tuning.
+
+.. |K8s cluster| image:: ./Kubernetes_cluster.png

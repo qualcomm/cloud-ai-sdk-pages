@@ -1,0 +1,176 @@
+.. _reference-to-compile-the-model:
+
+Compile the Model
+#################
+
+.. toctree::
+    :maxdepth: 1
+    :titlesonly:
+    :hidden:
+
+    Model-Configurator/network-performance-tuning
+    Tune-performance/index
+
+The AI/ML models compilation step compiles a pre-trained model defined
+in other formats (ONNX is preferred) into QAic program container (QPC)
+format. Cloud AI devices require this format to run inference.
+
+A pretrained model can be compiled in three ways:
+
+* Using qaic-compile (binary executable shipped with the Apps SDK). This section describes how to compile using qaic-compile.
+  
+* Using high level Python APIs. See the :ref:`Python API reference <reference-to-python-api>` for more information.
+
+* Using C++ APIs. See the :ref:`C++ API reference <reference-to-cpp-api>` for more information.
+  
+This section describes the following:
+
+* How to generate a list of :ref:`supported operators <check-operator>`
+
+* How to :ref:`compile the pretrained model <compile-using-qaic>`
+
+* :ref:`Supported data formats <datatypes>` and use cases
+
+* :ref:`Tuning techniques <reference_to_tune_performance>` and performance parameters
+
+
+Prerequisite
+****************
+
+1. Use ONNX format as input.
+2. Try to squash the original model into a single file ONNX format.
+
+.. _compile-using-qaic:
+
+Compilation using ``qaic-compile``
+************************************
+
+The qaic-compile, a CLI tool, is used to compile the model. This CLI tool has support for all the latest compiler flags.
+``qaic-compile`` is a sophisticated tool with a number of arguments.
+
+qaic-compile CLI is located at ``/opt/qti-aic/exec/qaic-compile``
+
+For the complete extensive list of arguments, their descriptions for usage and examples, see :ref:`QAic compile <reference_to_qaic_compile>`. Also CLI help/usage command provides the extensive list of arguments and their descriptions as well.
+
+.. code-block:: bash
+
+    /opt/qti-aic/exec/qaic-compile -h
+    /opt/qti-aic/exec/qaic-compile --usage
+
+.. _check-operator:
+
+``qaic-compile`` can also be used to dump the supported operators.
+
+.. code-block:: bash
+
+    /opt/qti-aic/exec/qaic-compile -operators-supported=<onnx | tensorflow>
+
+.. tip::
+  
+   After compilation, use ``qaic-qpc validate`` to confirm your QPC binary is compatible with the hardware installed on your system before proceeding to execution.
+ 
+
+.. _datatypes:
+
+Datatype support
+********************
+
+The Cloud AI SDK supports multiple numeric formats,
+each offering a different balance between model accuracy, memory
+footprint, and inference throughput. The format you choose
+directly affects both output quality and hardware performance.
+
+The following sections describe each supported format and its use case.
+
+FP32 (Single Precision Floating Point)
+======================================
+
+Models can be executed in FP32 for use cases where accuracy is critical
+and computational efficiency isn't a primary concern. It's essential
+to note that FP32 models tend to have larger sizes and will exhibit
+lower throughput performance. FP32 execution is supported but not
+recommended.
+
+FP16 (Half Precision Floating Point)
+======================================
+
+FP16 strikes a balance between accuracy and efficiency, making it
+suitable for most deep learning workloads.
+
+If a model is originally trained in FP32 format, it can be
+down-converted to FP16 during the compilation process using the
+``-convert-to-fp16`` flag. However, certain scenarios may involve
+constants beyond the FP16 range. In such cases, it is recommended to
+clip values to the FP16 range (as demonstrated in the fix_onnx_fp16
+function in the NLP tutorials in `Cloud-ai-sdk
+repo <https://github.com/qualcomm/cloud-ai-sdk>`__).
+
+FP8 (8-bit Floating Point)
+================================
+
+Models in FP8 format are supported through `Qualcomm Efficient-Transformers <https://github.com/qualcomm/efficient-transformers>`_.
+
+Shared Micro-exponents (Narrow Precision Format)
+================================================
+
+The shared micro-exponent spec is
+`here <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf>`__.
+The Cloud AI compiler will support all of the formats over time.
+Currently, MXFP6 is supported by the compiler.
+
+Models compiled in MXFP6 format stores FP32/FP16 weights using a 6-bit
+format. By doing so, it significantly reduces model sizes due to the
+compact representation. This format is particularly beneficial for
+models that require high data bandwidth, such as large language models
+(LLMs).
+
+AI 100 stores Matmul weights in MXFP6 format while keeping the rest of
+the weights in FP16 format. Computation/activations on the NSP still
+occur in FP16.
+
+LLMs experience up to 2x throughput with minimal accuracy loss with
+MXFP6 format. Within a constant memory footprint, a larger model can be
+supported with MXFP6.
+
+FP32 models can be compiled into MXFP6 format using the compiler flag
+``-mxfp6-matmul``. FP16 execution should use both ``-convert-to-fp16``
+and ``-mxfp6-matmul`` flags for the ``qaic-compile`` compiler CLI.
+
+INT8 (8-bit Integer)
+========================
+
+AI 100 supports INT8 quantized models, especially relevant
+for Natural Language Processing (NLP) and Computer Vision (CV) tasks.
+
+Quantization Methods Supported:
+
+* Quantization Schema for Weights and Activations: Both symmetric and asymmetric.
+
+* Quantization Calibration: Options include KLMinimization, KLMinimizationV2, MSE, SQNR, and
+  Percentile (with percentile calibration values: 99.9, 99.99, 99.999,
+  99.9999).
+
+The SDKs provide tools to run a profile-guided quantization (PGQ) sweep, allowing you to identify the
+optimal quantization parameters for your specific requirements.
+
+INT4 (4-bit Integer)
+==========================
+AWQ and GPTQ quantized models with 4-bit weights are supported
+through `Qualcomm Efficient-Transformers <https://github.com/qualcomm/efficient-transformers>`_
+
+BF16 (BFloat16)
+===============
+
+If a model is trained in BF16 (bfloat16), ensure that the weights are
+scaled down using an appropriate scaling factor to prevent
+intermediate activations from overflowing into ``fp16``. Qualcomm can
+provide a script to identify the scaling factors to scale down the
+weights of the models.
+
+Next steps
+***************
+
+*   See :ref:`reference_to_Model_Configurator` for more information about using the model configurator tool to find the optimal compiler and runtime configurations.
+*   Inspect your QPC binary with :ref:`ref-to-qaic-qpc`.
+*   See :ref:`reference_to_tune_performance` to learn how to achieve the best throughput and latency based on your use case.
+  

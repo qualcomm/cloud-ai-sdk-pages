@@ -1,0 +1,305 @@
+.. _reference_to_llmd:
+
+llm-d
+=====
+
+`llm-d <https://llm-d.ai>`__ is a Kubernetes-native orchestration layer that runs on top
+of `vLLM <https://docs.vllm.ai>`__ to deliver production-scale LLM inference. It adds
+intelligent prefix-cache-aware routing, prefill/decode (PD) disaggregation, and
+workload-aware autoscaling through a standard Helm-based deployment workflow.
+
+.. note::
+
+   llm-d requires the QAIC vLLM image as its model server — vLLM runs inside every
+   prefill and decode pod. See :doc:`/Getting-Started/Model-Serving/vLLM-Serving/index`
+   for available image tags and vLLM-specific configuration.
+
+Qualcomm Cloud AI 100 support is available through QAIC patch files shipped with the SDK.
+These patches extend the upstream llm-d and llm-d-modelservice Helm charts with QAIC
+accelerator configuration, custom proxy containers, and KV-handoff integration.
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   qaic-integration
+   disaggregation
+   autoscaling
+
+.. _llmd-architecture:
+
+Architecture
+------------
+
+Prefill-Decode (PD) disaggregation separates the two phases of LLM token generation onto
+dedicated pods:
+
+- **Prefill pods** — process the input prompt (compute-intensive, short-lived per request).
+- **Decode pods** — generate output tokens iteratively (memory-bandwidth-intensive, long-lived per request).
+
+Separating these phases eliminates prefill interference with decode latency, enabling lower
+inter-token latency (ITL) and higher throughput for long-context workloads.
+
+Standard PD and LMCache
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+                        Client
+                           |
+                           v
+              +------------------------+
+              |   Inference Gateway    |
+              |   (Istio)  :80         |
+              +----------+-------------+
+                         |
+                         v
+              +------------------------+
+              |   GAIE EPP             |
+              |   prefix-cache-aware   |
+              |   load balancer        |
+              +--------+-------+-------+
+                       |       |
+              prefill  |       |  decode
+              request  |       |  request
+                       v       v
+            +----------+     +----------+
+            | Prefill  |     | Decode   |
+            | Pod      |     | Pod      |
+            | :8000    |     | :9800    |
+            | producer |     | consumer |
+            +----+-----+     +----+-----+
+                 |                |
+                 |  KV transfer   |
+                 +-------+--------+
+                         |
+                         v
+              +------------------------+
+              |   kv-handoff-server    |  (LMCache variant only)
+              |   :5656                |
+              +------------------------+
+
+E-PD (Encode-Prefill-Decode for VLMs)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The encode model runs inside the prefill pod. A custom proxy sidecar in the decode pod
+routes encode requests to the prefill service (port 9900) and decode requests to the
+vLLM decode backend (port 9800). The GAIE InferencePool targets decode pods only.
+
+.. code-block:: text
+
+                        Client
+                           |
+                           v
+              +------------------------+
+              |   Inference Gateway    |
+              |   (Istio)  :80         |
+              +----------+-------------+
+                         |
+                         v
+              +------------------------+
+              |   GAIE EPP             |
+              |   InferencePool        |
+              |   (decode pods only)   |
+              +----------+-------------+
+                         |
+                         v
+              +------------------------------+
+              |   Decode Pod                 |
+              |  +------------------------+  |
+              |  |  Custom Proxy  :8000   |  |
+              |  +----+----------+--------+  |
+              |       |          |           |
+              | encode|    decode|           |
+              | reqs  |    reqs  |           |
+              +-------+----------+-----------+
+                      |          |
+                      v          v
+            +-----------+    +-----------+
+            | Prefill/  |    |  vLLM     |
+            | Encode Pod|    |  Decode   |
+            | :9900     |    |  :9800    |
+            | (encode   |    |  (token   |
+            |  model)   |    |   gen)    |
+            +-----------+    +-----------+
+
+Autoscaling Architecture
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Workload Variant Autoscaler (WVA) scales prefill and decode independently using
+KV cache utilization and request queue depth — not CPU or GPU — as the saturation signal.
+
+.. image:: wva_architecture.png
+   :alt: WVA architecture — two independent controllers emitting wva_desired_replicas consumed by separate HPAs
+   :align: center
+   :width: 650
+
+Each reconciliation cycle (~60 s), WVA:
+
+1. Collects peak KV cache usage and queue depth from Prometheus for all pods of the model
+   (using ``max_over_time[1m]`` for safety).
+2. Identifies non-saturated replicas: those where ``kv_cache < threshold`` **and**
+   ``queue < threshold``.
+3. Calculates average spare capacity across non-saturated replicas.
+4. Triggers **scale-up** if average spare KV cache ``< kvSpareTrigger`` **or** average
+   spare queue ``< queueSpareTrigger``.
+5. Simulates **scale-down** safety: redistributes total load across ``N-1`` replicas; only
+   scales down if the result still has sufficient headroom.
+6. Emits ``wva_desired_replicas`` to Prometheus; HPA reads this and scales the Deployment.
+
+Cascade scaling protection: WVA skips variants with pending (not-yet-ready) pods during
+scale-up selection, preventing over-provisioning during the model-loading window.
+
+Helm Releases
+~~~~~~~~~~~~~
+
+Every deployment uses three coordinated Helm releases:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 55
+
+   * - Release
+     - Chart
+     - Purpose
+   * - ``ms-pd-qaic``
+     - llm-d-modelservice
+     - Deploys prefill + decode pods, routing sidecar, kv-handoff-server
+   * - ``gaie-pd-qaic``
+     - inferencepool (GAIE)
+     - Deploys the EPP router and InferencePool targeting decode pods
+   * - ``infra-pd-qaic``
+     - llm-d-infra
+     - Deploys the Istio Inference Gateway
+
+Supported Workflows
+-------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 20 15 10
+
+   * - Workflow
+     - Model
+     - vLLM Version
+     - Single Host
+     - Multi Host
+   * - PD Disaggregation — QAIC native connector
+     - Llama-3.1-8B-Instruct
+     - 0.15
+     - Yes
+     - No
+   * - PD Disaggregation — LMCache connector
+     - Llama-3.1-8B-Instruct
+     - 0.15
+     - Yes
+     - Yes
+   * - E-PD Disaggregation (VLM)
+     - Qwen2.5-VL-32B-Instruct
+     - 0.8.5
+     - Yes
+     - Yes
+   * - Workload autoscaling with PD
+     - Llama-3.1-8B-Instruct
+     - 0.15
+     - Yes
+     - Yes
+   * - Workload autoscaling with E-PD
+     - Qwen2.5-VL-32B-Instruct
+     - 0.8.5
+     - Yes
+     - Yes
+
+Setup Steps
+-----------
+
+.. list-table::
+   :header-rows: 0
+   :widths: 15 85
+
+   * - **Step 0**
+     - Kubernetes cluster (v1.33.0+) with the QAIC device plugin running.
+       See :doc:`../index` for device plugin setup instructions.
+   * - **Step 1**
+     - :doc:`qaic-integration` — clone and patch the llm-d repos, install Istio,
+       generate the model service configuration.
+   * - **Step 2**
+     - :doc:`disaggregation` — deploy PD or E-PD disaggregated serving.
+   * - **Step 3**
+     - :doc:`autoscaling` — deploy the Workload Variant Autoscaler (WVA).
+
+Dependencies
+------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 20 40
+
+   * - Category
+     - Component
+     - Version
+     - Purpose
+   * - Client tools
+     - kubectl
+     - v1.33.0+
+     - Kubernetes CLI
+   * - Client tools
+     - helm
+     - v3.12.0+
+     - Kubernetes package manager
+   * - Client tools
+     - helmfile
+     - v1.1.0+
+     - Declarative Helm deployment
+   * - Client tools
+     - yq
+     - v4+
+     - YAML processor
+   * - Client tools
+     - jq
+     - latest
+     - JSON processor
+   * - Client tools
+     - helm-diff plugin
+     - v3.10.0+
+     - Helm chart diff viewer
+   * - Kubernetes
+     - Kubernetes cluster
+     - v1.33.0+
+     - Container orchestration
+   * - Kubernetes
+     - Gateway API CRDs
+     - v1.5.1
+     - Gateway API definitions
+   * - Kubernetes
+     - Gateway API Inference Extension CRDs
+     - v1.4.0
+     - Inference-specific routing extensions
+   * - Kubernetes
+     - Istio
+     - v1.29.1
+     - Service mesh and gateway provider
+   * - llm-d charts
+     - llm-d-infra
+     - v1.4.0
+     - Infrastructure Helm chart
+   * - llm-d charts
+     - llm-d-modelservice
+     - v0.4.9
+     - Model deployment management
+   * - llm-d charts
+     - inferencepool (GAIE)
+     - v1.4.0
+     - Inference routing and scheduling
+   * - Autoscaling
+     - Workload Variant Autoscaler (WVA)
+     - v0.6.0
+     - KV-cache and queue-based autoscaler
+   * - Autoscaling
+     - Prometheus Adapter
+     - v5.2.0
+     - Exposes WVA metrics to HPA
+   * - Monitoring
+     - Prometheus
+     - latest
+     - Metrics collection (required for autoscaling)

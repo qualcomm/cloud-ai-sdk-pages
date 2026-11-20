@@ -1,0 +1,262 @@
+Speculative Decoding
+====================
+
+.. note::
+
+   Speculative decoding is supported in AoT mode only. It's not available in
+   :doc:`PyT (PyTorch eager) mode <Execution-Modes>`.
+
+
+Overview
+--------
+
+Speculative decoding (SpD) reduces decode latency by using a proposer to
+generate candidate tokens that the target model verifies in a single forward
+pass. When the proposer has a high acceptance rate, the target model can
+produce more accepted tokens per decode step. The benefit depends on the
+workload and the selected proposer.
+
+Cloud AI supports these SpD methods:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 30 22 30
+
+   * - Method
+     - Proposer
+     - Additional model and cores
+     - Typical use
+   * - ``ngram``
+     - N-Gram matches from the prompt
+     - No separate model or cores
+     - Summarization and repetitive output
+   * - ``suffix``
+     - Suffix-array matches from prior context
+     - No separate model or cores
+     - Code completion and long-context echo
+   * - ``draft_model``
+     - A smaller language model
+     - Separate draft model; target/draft core allocation
+     - General text generation
+   * - ``dflash``
+     - A DFlash diffusion-language-model proposer
+     - Separate draft model; explicit target/draft overrides required
+     - Text-only dense-model deployments
+
+N-Gram
+------
+
+N-Gram SpD searches the prompt for matching token windows and proposes the
+tokens that follow a match. It doesn't require a draft model or a separate
+core allocation. The lookup window is controlled by
+``prompt_lookup_min`` and ``prompt_lookup_max``. If neither is supplied,
+vLLM uses a default window of 5 tokens.
+
+The following Python configuration uses the ``ngram`` method and an explicit
+lookup window:
+
+.. code-block:: python
+
+   from vllm import LLM
+
+   llm = LLM(
+       model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+       max_num_seqs=16,
+       max_model_len=256,
+       quantization="mxfp6",
+       kv_cache_dtype="mxint8",
+       speculative_config={
+           "method": "ngram",
+           "num_speculative_tokens": 5,
+           "prompt_lookup_min": 3,
+           "prompt_lookup_max": 5,
+       },
+   )
+
+Suffix
+------
+
+Suffix SpD proposes tokens by matching suffixes in the available context. It
+doesn't require a separate draft model or a separate core allocation:
+
+.. code-block:: python
+
+   llm = LLM(
+       model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+       max_num_seqs=16,
+       max_model_len=256,
+       quantization="mxfp6",
+       kv_cache_dtype="mxint8",
+       speculative_config={
+           "method": "suffix",
+           "num_speculative_tokens": 5,
+       },
+       additional_config={"device_group": [0]},
+   )
+
+Draft Model
+-----------
+
+The ``draft_model`` method uses a smaller language model to propose tokens
+for the target model. The target and draft models can share a device group,
+with their core allocation controlled by
+``override_qaic_config`` and ``draft_override_qaic_config``. The following
+example is based on the validated ``examples/qaic_spd.py`` example:
+
+.. code-block:: python
+
+   from vllm import LLM
+
+   llm = LLM(
+       model="meta-llama/Llama-3.1-8B-Instruct",
+       max_num_seqs=4,
+       max_model_len=2048,
+       quantization="mxfp6",
+       kv_cache_dtype="mxint8",
+       additional_config={
+           "override_qaic_config": {
+               "device_group": [0],
+               "num_cores": 10,       # target model
+           },
+           "draft_override_qaic_config": {
+               "device_group": [0],   # same device group
+               "num_cores": 6,        # draft model
+           },
+       },
+       speculative_config={
+           "method": "draft_model",
+           "model": "meta-llama/Llama-3.2-1B-Instruct",
+           "num_speculative_tokens": 3,
+           # Optional: quantization used for the draft model weights.
+           # "quantization": "mxfp6",
+       },
+   )
+
+On a Cloud AI 100 Ultra card, the default draft-model allocation is 8 target
+cores and 8 draft cores when no explicit ``num_cores`` values are provided.
+The 10/6 split above is a recommended starting point for an 8B target and a
+1B draft model. Tune the allocation for the models and workload being served.
+
+DFlash
+------
+
+The ``dflash`` method uses a DFlash diffusion language model as the proposer.
+The public SpD configuration must set ``num_speculative_tokens`` to one less
+than the DFlash checkpoint's ``block_size``:
+
+.. code-block:: python
+
+   import json
+
+   from huggingface_hub import hf_hub_download
+   from vllm import LLM
+
+   def _dflash_block_size(dlm_repo: str) -> int:
+       """Read block_size (num_speculative_tokens + 1) from the checkpoint."""
+       cfg_path = hf_hub_download(repo_id=dlm_repo, filename="config.json")
+       with open(cfg_path) as f:
+           cfg = json.load(f)
+       block_size = cfg.get("block_size") or cfg.get("dflash_config", {}).get(
+           "block_size"
+       )
+       if block_size is None:
+           raise ValueError(f"no block_size in {dlm_repo}/config.json")
+       return int(block_size)
+
+   dlm_repo = "z-lab/Qwen3-4B-DFlash-b16"
+   block_size = _dflash_block_size(dlm_repo)  # read from config.json
+
+   llm = LLM(
+       model="Qwen/Qwen3-4B",                  # target model
+       trust_remote_code=True,
+       quantization="mxfp6",
+       kv_cache_dtype="mxint8",
+       additional_config={
+           "override_qaic_config": {
+               "device_group": [0, 1, 2, 3],
+               "num_cores": 8,
+               "prefill_seq_len": 128,
+           },
+           "draft_override_qaic_config": {
+               "device_group": [0, 1, 2, 3],
+               "num_cores": 8,
+               "prefill_seq_len": block_size,
+           },
+       },
+       speculative_config={
+           "method": "dflash",
+           "model": "z-lab/Qwen3-4B-DFlash-b16",
+           "num_speculative_tokens": block_size - 1,
+       },
+   )
+
+The target and draft QAIC overrides are required for DFlash. DFlash is
+limited to text-only dense models; multimodal and Mixture-of-Experts (MoE)
+models aren't supported.
+
+Configuration keys
+------------------
+
+Python dictionaries and JSON objects use the following snake_case keys. The
+keys aren't interchangeable with CLI spellings:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Python/JSON key
+     - Location
+     - Meaning
+   * - ``method``
+     - ``speculative_config``
+     - SpD method: ``ngram``, ``suffix``, ``draft_model``, or ``dflash``.
+   * - ``model``
+     - ``speculative_config``
+     - Draft model repository or path for ``draft_model`` and ``dflash``.
+   * - ``num_speculative_tokens``
+     - ``speculative_config``
+     - Number of candidate tokens proposed per step. For DFlash, use
+       ``block_size - 1``.
+   * - ``prompt_lookup_min``
+     - ``speculative_config``
+     - Minimum N-Gram window. Used with ``ngram``.
+   * - ``prompt_lookup_max``
+     - ``speculative_config``
+     - Maximum N-Gram window. Used with ``ngram``.
+   * - ``quantization``
+     - ``speculative_config``
+     - Optional quantization used for a draft model's weights.
+   * - ``additional_config``
+     - ``LLM`` or engine configuration
+     - QAIC-specific configuration container.
+   * - ``override_qaic_config``
+     - Inside ``additional_config``
+     - QAIC compiler settings for the target model.
+   * - ``draft_override_qaic_config``
+     - Inside ``additional_config``
+     - QAIC compiler settings for the draft model.
+
+For command-line serving, use the hyphenated flags
+``--speculative-config`` and ``--additional-config``. The values passed to
+these flags are JSON objects and must retain the snake_case keys shown above.
+The nested QAIC override keys are not standalone ``--override-qaic-config``
+or ``--draft-override-qaic-config`` flags.
+
+Validated examples
+------------------
+
+The QAIC repository contains the following complete examples:
+
+- `examples/qaic_ngram_suffix.py <https://github.com/qualcomm/vllm-qaic/blob/v1.23.0/examples/qaic_ngram_suffix.py>`__
+  runs both ``ngram`` and ``suffix``.
+- `examples/qaic_spd.py <https://github.com/qualcomm/vllm-qaic/blob/v1.23.0/examples/qaic_spd.py>`__
+  runs ``draft_model`` with target/draft core allocation.
+- `examples/qaic_spd_dflash.py <https://github.com/qualcomm/vllm-qaic/blob/v1.23.0/examples/qaic_spd_dflash.py>`__
+  is the DFlash example included in the vLLM QAIC ``v1.23.0`` release.
+
+Limitations
+-----------
+
+- SpD doesn't currently support disaggregated serving.
+- DFlash supports text-only dense models only. Multimodal and MoE models are
+  excluded.

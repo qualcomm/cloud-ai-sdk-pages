@@ -1,0 +1,228 @@
+.. -----------------------------------------------------------------------------
+..
+.. Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. All rights reserved.
+.. Confidential and Proprietary - Qualcomm Technologies, Inc. and/or its subsidiaries.
+..
+.. -----------------------------------------------------------------------------
+
+AICM User Guide
+===============
+
+This guide is for operators and integrators who install, configure, and use
+AIC Manager (AICM) to monitor AIC100 devices.
+
+.. contents:: Table of Contents
+   :local:
+   :depth: 2
+
+Introduction
+------------
+
+AIC Manager is a REST API service that collects telemetry from AIC100 cards
+and makes it available to dashboards, alerting systems, and automation tools.
+
+Key capabilities:
+
+* **Metrics retrieval** — health, PCIe, DDR bandwidth, and RAS error data for
+  every connected AIC100 device, updated at configurable intervals.
+* **Device groups** — logical collections of devices that can be targeted as a
+  unit in all metric and policy APIs.
+* **Policies and alerts** — threshold-based rules that send real-time
+  Server-Sent Event (SSE) notifications when a condition is violated.
+* **Diagnostic checks** — on-demand device health assessments via the
+  ``qaic-fdt`` Field Diagnostics Tool, with results delivered over SSE.
+* **Prometheus integration** — dedicated endpoints that serve metrics in
+  Prometheus text format for scraping.
+* **Interactive CLI** — a terminal client (``aicmi``) that wraps all API
+  operations for quick interactive use.
+
+Requirements
+------------
+
+* Python 3.8 or later
+* ``qmonitor`` running on the same host (AICM uses it as the only supported
+  device-communication backend)
+* Root or ``sudo`` access is required for diagnostic checks and for full device
+  access when running the service
+
+.. raw:: html
+
+   <span id="install-dependencies"></span>
+
+Installation
+------------
+
+Install dependencies into a virtual environment:
+
+.. code-block:: bash
+
+   python -m venv <path-to-the-virtual-environment>
+   source <path-to-the-virtual-environment>/bin/activate
+   pip install -r requirements.txt
+
+Starting AICM
+-------------
+
+Start Agent
+^^^^^^^^^^^
+
+After activating the virtual environment, start AICM with:
+
+.. code-block:: bash
+
+   python aicm_agent.py [OPTIONS]
+
+Full option reference:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Option
+     - Description
+   * - ``-h``, ``--help``
+     - Show help and exit.
+   * - ``-c CONFIG_FILE``, ``--config_file CONFIG_FILE``
+     - Path to a configuration file (INI format).  CLI flags take priority.
+   * - ``--ip IP``
+     - IP address to bind to (default: ``127.0.0.1``).
+   * - ``--port PORT``
+     - Port to listen on (default: ``9000``).
+   * - ``-u USERS``, ``--users USERS``
+     - Full path to the ``.users.yaml`` credentials file.
+   * - ``--ssl-key SSL_KEY``
+     - Path to the SSL private key file.  Required for HTTPS.
+   * - ``--ssl-cert SSL_CERT``
+     - Path to the SSL certificate file.  Required for HTTPS.
+   * - ``--qmonitor-ip QMONITOR_IP``
+     - IP of the QMonitor gRPC server (default: ``localhost``).
+   * - ``--qmonitor-port QMONITOR_PORT``
+     - Port of the QMonitor gRPC server (default: ``62472``).
+   * - ``--log LOG``
+     - Directory path for log files.
+   * - ``--max-log-size MAX_LOG_SIZE``
+     - Maximum log file size in bytes (default: ``100000000``).
+   * - ``-v``, ``--verbose``
+     - Increase output verbosity.
+   * - ``--collection KEY=VALUE [KEY=VALUE ...]``
+     - Override collection intervals in milliseconds, e.g.
+       ``--collection HEALTH=500 PCI=2000``.
+   * - ``--dump-default-config PATH``
+     - Write a default ``config.ini`` to the given directory and exit.
+   * - ``--dump-default-users PATH``
+     - Write a default ``.users.yaml`` to the given directory and exit.
+
+By default AICM binds to ``localhost``.  To expose it on the local network,
+pass ``--ip 0.0.0.0`` or a specific interface IP.
+
+Configuration File
+^^^^^^^^^^^^^^^^^^
+
+All options can be supplied via a config file instead of (or alongside) CLI
+flags.  CLI flags take priority when both are present.  Generate a starter
+file with:
+
+.. code-block:: bash
+
+   python aicm_agent.py --dump-default-config .
+
+Example ``config.ini``:
+
+.. code-block:: ini
+
+   # IP to bind AICM
+   ip = 127.0.0.1
+
+   # Port to bind AICM
+   port = 9000
+
+   # Full path to users credentials file
+   # users =
+
+   # SSL Key path
+   # ssl_key =
+
+   # SSL Certificate path
+   # ssl_cert =
+
+   # IP of QMonitor GRPC Server
+   qmonitor_ip = localhost
+
+   # Port of QMonitor GRPC Server
+   qmonitor_port = 62472
+
+   # Path to directory where to store logs
+   # log =
+
+   # Max sizes of logs in bytes
+   max_log_size = 100000000
+
+   # Verbosity of AICM agent
+   verbose = 0
+
+   # Collection intervals in milliseconds
+   collection = [HEALTH=1000, DDR_BW=1000, PCI=1000, RAS_ECC_ERROR=10000]
+
+Service Mode
+^^^^^^^^^^^^
+
+AICM can also be run as a background service:
+
+.. code-block:: bash
+
+   sudo bash scripts/start_aicm_agent.sh
+
+Stop Agent
+^^^^^^^^^^
+
+Stop the service started with ``start_aicm_agent.sh``:
+
+.. code-block:: bash
+
+   sudo bash scripts/stop_aicm_agent.sh
+
+If AICM was started directly with ``python aicm_agent.py``, press ``Ctrl+C``
+to stop it.
+
+Authentication
+--------------
+
+Setup Basic Auth
+^^^^^^^^^^^^^^^^
+
+AICM uses `HTTP Basic Auth <https://en.wikipedia.org/wiki/Basic_access_authentication>`__
+for all API requests.  Credentials are stored in a ``.users.yaml`` file.
+
+Example ``.users.yaml``:
+
+.. code-block:: yaml
+
+   credentials:
+     - username: admin
+       hash: $2b$12$rEQTKF4IVHKPyeX6miseJ.xOjhmI5OFqlLuwE2OB4CuEIvHC2IFP6
+       note: "Example credential — password: password"
+
+Passwords must **not** be stored in plain text.  Use the provided hashing
+script to generate a bcrypt hash:
+
+.. code-block:: bash
+
+   python ./scripts/hash_password.py <password>
+
+A default ``.users.yaml`` with an example ``admin / password`` entry can be
+generated with:
+
+.. code-block:: bash
+
+   python aicm_agent.py --dump-default-users .
+
+HTTPS
+^^^^^
+
+For production use, HTTPS is recommended.  Provide a signed certificate and
+key at startup:
+
+.. code-block:: bash
+
+   python aicm_agent.py --ssl-key /path/to/server.key --ssl-cert /path/to/server.crt
+

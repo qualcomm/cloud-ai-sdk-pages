@@ -1,0 +1,58 @@
+Build vLLM (Optional)
+=====================
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   build-x86
+..
+   build-aarch64 - Excluded: ARM64 support deprecated. File kept for potential future re-enablement.
+
+
+This guide demonstrates how to add Qualcomm Cloud AI backend support to the
+`vLLM <https://github.com/vllm-project/vllm>`__ open-source library,
+which simplifies the creation of OpenAI-compatible web endpoints and
+provides features like continuous batching and other optimizations for
+LLM inference and serving.
+
+Qualcomm Cloud AI support is provided by the
+`vllm-qaic <https://github.com/qualcomm/vllm-qaic>`__ plugin, which installs on
+top of upstream vLLM 0.23.0. The plugin can be installed in AoT mode or in PyT
+(PyTorch eager) mode. Each mode needs its own Python virtual environment. See
+:doc:`Execution-Modes` for a comparison.
+
+* :doc:`Build for x86_64<build-x86>`
+
+..
+   ARM64 support deprecated - Link removed but build-aarch64.rst file kept in repo
+   * :doc:`Build for AArch64<build-aarch64>`
+
+
+Note
+~~~~
+
+Multiple vLLM versions support is available, users can select the vLLM version that aligns with their target model and feature requirements. For more details see :ref:`Cross Feature Support Matrix <reference_to_Cross_Feature_Support_Matrix>`
+
+
+Running a sample inference
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+From the ``vllm-qaic`` repository root:
+
+.. code-block:: bash
+
+   # AoT mode
+   python examples/qaic.py
+
+   # PyT mode
+   python examples/qaic_eager_mode.py
+
+
+vLLM Deployment, Supported Features and Capabilities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The vLLM deployment workflow describes the end-to-end process for serving Large Language Models (LLMs) and Vision-Language Models (VLMs) using vLLM on Qualcomm® Cloud AI accelerators.
+
+The vLLM supported features and capabilities section highlights the key functionalities available when running vLLM with Qualcomm Cloud AI backend support. These include optimized model execution, continuous batching, advanced quantization options, large-context support, and integration with performance-enhancing features such as prefix caching and disaggregated serving. Together, these capabilities enable efficient, flexible, and production-ready inference for modern LLM and VLM workloads on AI 100 accelerators.
+

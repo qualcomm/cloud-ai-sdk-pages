@@ -1,0 +1,145 @@
+.. include:: ../../substitutions.rst.in
+
+.. _reference-to-inference-workflow:
+
+Model inference workflow
+==========================
+
+.. toctree::
+   :titlesonly:
+   :hidden:
+
+   Export-the-model/index
+   model-compilation/index
+
+.. only:: appliance
+
+   .. toctree::
+      :titlesonly:
+      :hidden:
+
+      model-execution/index
+
+.. only:: not appliance
+
+   .. toctree::
+      :titlesonly:
+      :hidden:
+
+      run-model
+      ../Deployment/index
+      Serve the model <../Model-Serving/index>
+
+.. only:: appliance
+
+   You can deploy a pre-trained model for inference on a Cloud AI platform by following the model inference workflow for ONNX or PyTorch eager mode. Exporting the model in ONNX format is strongly recommended due to operator support. This section describes the model inference workflow for ONNX. For more information about eager mode execution, see the :ref:`Pytorch workflow <pytorch-workflow>`.
+
+.. only:: not appliance
+
+   You can run a pre-trained model on Cloud AI accelerators using either PyTorch
+   or a compiled QPC. The :ref:`PyTorch workflow <pytorch-workflow>` supports
+   eager mode and ``torch.compile`` without requiring ONNX export or QPC
+   generation beforehand. The compiled-model workflow exports the model to
+   ONNX, compiles it into a QPC, and runs inference through the CLI or APIs.
+   See :doc:`run-model` to choose a method. The stages below describe the
+   compiled ONNX/QPC route.
+
+Model inference workflow for ONNX 
+-----------------------------------
+
+The following image shows the stages and primary roles in the model inference workflow for ONNX. The workflow spans multiple stages, from model compilation to production serving, and different roles may have different entry points into the workflow. 
+
+.. figure:: ../../images/model-inference-workflow.svg
+   :alt: Model inference workflow
+   :align: center
+   :width: 700
+
+   Stages and primary roles in the model inference workflow
+
+
+The following table provides a brief description of each stage in the workflow as well as the primary role responsible for each section.  
+
+.. list-table:: Stages in the model inference workflow
+   :header-rows: 1
+   :widths: 25 46 22
+
+   * - Stage
+     - Description
+     - Primary role
+   * - :ref:`Export and prepare the model <export-the-model>`
+     - Export and prepare a pre-trained model as explained in this section to achieve the best performance and accuracy. 
+     - ML/AI Engineer
+   * - :ref:`Compile the model <reference-to-compile-the-model>`
+     - Compilation of the prepared ONNX file generates a QAiC program container (QPC) which can be loaded and executed on Cloud AI devices. Compile using the appropriate parameters for your use case, then tune the parameters to get the best performance from the device based on your throughput and latency requirements.
+     - MI/AI Engineer
+   * - :doc:`Run the model <model-execution/index>`
+     - This section details the different ways (CLI, C++, Python, ONNX Runtime) to execute inferences on Cloud AI platforms and how to profile inferences at the system and device level.
+     - ML/AI Engineer
+   * - :ref:`Set up containers <reference_to_docker>`
+     - This section details how to build and configure Docker container images for running inference workloads. Build your own or select from a set of prebuilt images for different inference workflows. 
+     - MLOps/DevOps Engineer
+   * - :doc:`Deploy the model <../Deployment/Kubernetes/index>`
+     - Use Kubernetes to deploy the container to Cloud AI devices.
+     - Infrastructure/Platform Engineer
+   * - :doc:`Model serving <../Model-Serving/index>`
+     - Expose the compiled model as an inference endpoint using vLLM, Triton or Text Generation Inference (TGI) toolkit. 
+     - MLOps/DevOps Engineer
+
+Select your path
+-----------------
+
+Depending on your role, you may not need to complete every stage — use the following diagram to identify your starting point.
+
+.. mermaid::
+  :caption: Model inference workflow tasks by role
+  :align: center
+
+  %%{init: { 'themeVariables': { 'edgeLabelBackground': '#fff', 'fontSize': '18px' }, 'flowchart': { 'nodeSpacing': 55, 'rankSpacing': 65 } } }%%
+    flowchart TD
+    %% Global Styling
+    classDef default fill:#fff,stroke:#000,color:#000,font-family:Roboto,font-size:18px;
+
+    A([Start]) --> B{What is your role?}
+
+    %% Subgraph to force horizontal alignment of roles
+    subgraph Roles [ ]
+        direction LR
+        C(ML/AI Engineer)
+        D(MLOps/DevOps Engineer)
+        E(Infrastructure/Platform Engineer)
+    end
+
+    B --> C
+    B --> D
+    B --> E
+
+    %% ML/AI Path
+    C --> F{Do you have a pre-exported model?}
+    F -->|No| G[Export the model]
+    F -->|Yes| H[Compile the model]
+    G -->|ONNX| H
+    H -->|QPC| I[Run the model]
+
+    %% MLOps Path
+    D --> J{Starting point?}
+    J -->|Containers| K[Set up containers]
+    J -->|Serving only| N[Serve the model]
+    K --> L[Deploy the model]
+    L --> N
+
+    %% Infrastructure Path
+    E --> L
+
+    %% Style the subgraph to be invisible
+    style Roles fill:none,stroke:none
+
+|nbsp|
+
+Next steps
+-----------
+
+* If you are a ML/AI engineer, start with :ref:`export and prepare the model<export-the-model>`.
+
+* If you are a MLOps/DevOps engineer, see :ref:`set up containers <reference_to_docker>` and :doc:`model serving <../Model-Serving/index>`.
+
+* If you are a Infrastructure/Platform engineer, see :doc:`deploy the model <../Deployment/Kubernetes/index>`.

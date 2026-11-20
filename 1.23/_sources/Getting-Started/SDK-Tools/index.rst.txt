@@ -1,0 +1,56 @@
+.. _reference-to-introduction:
+
+SDK tools
+=========
+
+The Qualcomm Cloud AI Platform and Apps SDKs contain applications and
+tools to help you in every step of the deep learning inference
+workflow. The workflow involves taking a trained model through model
+conversion, model evaluation (performance, accuracy, etc.), and
+deployment in an end-to-end machine learning (ML) application.
+
+SDK version
+-----------
+
+.. toctree::
+   :maxdepth: 1
+
+   shared/qaic_version_util
+
+Card health, resources, and logs
+--------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   shared/qaic_util
+   shared/qaic_logger
+   shared/qaic_monitor_app
+   shared/qaicudevmonitor
+   shared/qaic_trace_control
+
+Model compilation
+-----------------
+
+.. toctree::
+   :maxdepth: 1
+
+   network-compilation/qaic-compile/index
+   network-compilation/qaic-qpc/index
+
+Model execution
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   network-execution/network-execution
+   shared/end-to-end-examples-compile-runner
+
+Oversubscription
+----------------
+
+.. toctree::
+   :maxdepth: 1
+
+   shared/qaic_oversubscription

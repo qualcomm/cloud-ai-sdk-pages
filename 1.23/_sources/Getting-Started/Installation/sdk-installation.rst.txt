@@ -1,0 +1,184 @@
+.. _reference-to-cloud-ai-sdk:
+
+================
+SDK installation
+================
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :maxdepth: 1
+
+   platform-sdk
+   apps-sdk
+
+The Cloud AI SDK includes two components, Platform SDK and Apps SDK. Choose the deployment mode below to see which components apply to your environment.
+
+.. _deployment-modes:
+
+Deployment modes
+-----------------
+
+.. only:: appliance
+
+   .. note:: If you are using the Dragonwing AI On-Prem Appliance, the hardware and software are pre-configured. The instructions in this section are provided for reference only
+
+Choose the mode that matches your setup:
+
+Cloud instance
+   Both the Platform SDK and Apps SDK are preinstalled on supported
+   cloud instances (AWS, Cirrascale). No SDK installation is required.
+
+.. only:: appliance
+
+   Single-host
+     The Platform SDK and Apps SDK are both installed on the same machine.
+     Compilation and inference run on the same system. This is the standard
+     path for local server and on-premises appliance installations.
+
+.. only:: not appliance
+
+   Single-host
+     The Platform SDK and Apps SDK are both installed on the same machine.
+     Compilation and inference run on the same system. This is the standard
+     path for local server installations.
+
+
+Offline compilation (separate build host)
+   The Apps SDK is installed on a dedicated build host **without** Cloud AI hardware for
+   model compilation only. Compilation doesn't require Cloud AI hardware. Compiled QPC artifacts are then transferred to a hardware-attached host running the Platform SDK for inference. Use
+   this mode when your build environment is separate from your inference environment.
+
+
+
+.. list-table:: SDK requirements by deployment mode
+   :widths: 40 30 30
+   :header-rows: 1
+
+   * - Host Role
+     - Platform SDK
+     - Apps SDK
+   * - Cloud instance (pre-provisioned)
+     - ✔ Preinstalled
+     - ✔ Preinstalled
+   * - Local server (single-host)
+     - ✔ Required
+     - ✔ Required
+   * - Offline build host (no hardware)
+     - ✘ Not required
+     - ✔ Required
+   * - Inference host (hardware only)
+     - ✔ Required
+     - ✘ Not required
+
+.. note::
+
+   Systems running Linux kernel 6.10 or later include KMD support and firmware for Qualcomm Cloud AI accelerators. If you are running kernel 6.10+ and deploying via containers, Platform SDK installation is optional - the Cloud AI container images bundle the necessary runtime libraries and tools.
+
+Choose your installation path
+-------------------------------
+
+Select the environment that matches your setup:
+
+.. only:: appliance
+
+  .. tab-set::
+
+    .. tab-item:: Cloud instance
+
+        SDKs are pre-installed on supported cloud instances (AWS, Cirrascale). Verify your installation before proceeding.
+
+    .. tab-item:: Local Server
+
+        Install both the Platform SDK and Apps SDK on the same host.
+        Follow the steps in order:
+
+        #. :doc:`Review Prerequisites <prerequisites>`.
+        #. :doc:`Download SDKs <download-sdks>`.
+        #. :doc:`Install Platform SDK <platform-sdk>`.
+        #. :doc:`Install Apps SDK <apps-sdk>`.
+
+    .. tab-item:: Offline build host
+
+        Install the Apps SDK on a host without Cloud AI hardware for model compilation then transfer the compiled QPC to an inference host with Cloud AI hardware for execution.
+
+        #. :doc:`Review Prerequisites <prerequisites>`.
+        #. :doc:`Download SDKs <download-sdks>`.
+        #. :doc:`Install Apps SDK <apps-sdk>`.
+    
+    .. tab-item:: Docker
+
+        Containerized deployments use prebuilt Cloud AI Inference containers or custom images built with the Apps SDK. Use the prebuilt images unless you need to customize the image for your workflow; prebuilt images reduce setup time and include validated dependencies.
+
+        #. :doc:`Install Platform SDK on the host <platform-sdk>`.
+        #. `Install Docker Engine <https://docs.docker.com/engine/install/>`_ on the host system that will run the container.
+        #. Choose a :ref:`prebuilt Cloud AI image <reference_to_docker>`, or use the Apps SDK on the host to :doc:`build a custom Docker image <../Deployment/Docker/build-image>`.
+        #. :ref:`Launch the container <reference-to-docker-launch-container>` with device access.
+
+        .. note::
+
+          Install the Docker Engine on the host system, not inside the
+          container.
+
+.. only:: not appliance
+
+  .. tab-set::
+
+    .. tab-item:: Cloud instance
+
+        SDKs are pre-installed on supported cloud instances (AWS, Cirrascale). Verify your installation before proceeding.
+
+    .. tab-item:: Local Server
+
+        Install both the Platform SDK and Apps SDK on the same host.
+        Follow the steps in order:
+
+        #. :doc:`Review Prerequisites <prerequisites>`.
+        #. :doc:`Download SDKs <download-sdks>`.
+        #. :doc:`Install Platform SDK <platform-sdk>`.
+        #. :doc:`Install Apps SDK <apps-sdk>`.
+
+    .. tab-item:: Offline build host
+
+        Install the Apps SDK on a host without Cloud AI hardware for model compilation then transfer the compiled QPC to an inference host with Cloud AI hardware for execution.
+
+        #. :doc:`Review Prerequisites <prerequisites>`.
+        #. :doc:`Download SDKs <download-sdks>`.
+        #. :doc:`Install Apps SDK <apps-sdk>`.
+    
+    .. tab-item:: Virtual machine
+
+        VM installation requires a two-stage setup: host-level hardware assignment followed by guest-level SDK installation.
+
+        **Stage 1: Host configuration**
+
+        #. :doc:`Verify physical host prerequisites <prerequisites>` (BIOS-level MSI and hardware support).
+        #. :doc:`Configure hypervisor <../Deployment/hypervisor/index>` (Enable PCIe passthrough and IOMMU emulation).
+
+        **Stage 2: Guest installation**
+
+        #. :doc:`Verify Guest OS Prerequisites <prerequisites>` (Supported OS, Kernel version, and Python 3.12).
+        #. :doc:`Download SDKs <download-sdks>`.
+        #. :doc:`Install Platform SDK <platform-sdk>`.
+        #. :doc:`Install Apps SDK <apps-sdk>`.
+
+        .. note::
+          
+          Inside the hypervisor settings, ensure that 32 message signal interrupts (MSI) are allocated to the VM to ensure the Platform SDK driver can initialize.
+    
+    .. tab-item:: Docker
+
+        Containerized deployments use prebuilt Cloud AI Inference containers
+        or custom images built with the Apps SDK.
+
+        #. :doc:`Install Platform SDK on the host <platform-sdk>`.
+        #. `Install Docker Engine <https://docs.docker.com/engine/install/>`_ on the host system that will run the container.
+        #. Choose a :ref:`prebuilt Cloud AI image <reference_to_docker>`, or use the Apps SDK on the host to :doc:`build a custom Docker image <../Deployment/Docker/build-image>`.
+        #. :ref:`Launch the container <reference-to-docker-launch-container>` with device access.
+
+        .. note::
+
+          Install the Docker Engine on the host system, not inside the
+          container. Prebuilt images are recommended unless you need to
+          customize the image for your workflow.
+

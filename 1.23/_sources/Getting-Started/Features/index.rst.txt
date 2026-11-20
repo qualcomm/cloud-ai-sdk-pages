@@ -1,0 +1,20 @@
+Advanced model techniques
+==========================
+
+In addition to the standard model workflow, the Cloud AI SDK provides specialized techniques for handling high-complexity models. Use the following resources to tune performance, implement custom logic, optimize performance through model sharding, and configure advanced postprocessing for vision-based workloads.
+
+
+
+.. toctree::
+   :maxdepth: 1
+
+   custom_ops/index
+   model_sharding/index
+   object-detection-postprocessing/Object-Detection-Post-processing
+
+.. only:: model_ip
+
+   .. toctree::
+      :maxdepth: 1
+
+      model-ip/index

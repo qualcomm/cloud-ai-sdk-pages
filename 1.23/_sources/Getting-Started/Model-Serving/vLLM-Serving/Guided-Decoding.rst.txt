@@ -1,0 +1,125 @@
+Guided Decoding
+===============
+
+Guided decoding (also called **structured outputs**) constrains a model's generation so that
+the output follows a required format - for example valid JSON that matches a schema, a value
+from a fixed set of choices, or a regular-expression / grammar. Instead of generating text
+token by token with no constraints, the decoder masks out any token that would violate the
+requested format at each step.
+
+This is useful when the model output must be machine-parseable, such as JSON for an API,
+function/tool-call arguments, or a constrained classification label.
+
+On Qualcomm Cloud AI accelerators, guided decoding is supported through vLLM's standard
+structured-outputs interface. The constraint is enforced on the host (CPU) using the
+**xgrammar** backend, while token generation runs on the accelerator.
+
+.. note::
+
+   Where the constraint is enforced depends on the vLLM engine version:
+
+   - On **V1** (vLLM ``v0.23.0``), guided decoding runs on the **host (CPU)** using the xgrammar
+     backend. This is the path described on this page.
+   - On **V0** (vLLM ``v0.8.5``), guided decoding can additionally run **on the accelerator
+     (on-device)** by setting ``override_qaic_config={"aic_include_guided_decoding": True}`` when
+     compiling the model, together with on-device sampling.
+
+Supported backend
+-----------------
+
+vLLM supports several structured-output backends. On Qualcomm Cloud AI, **xgrammar** is the
+supported and recommended backend.
+
+.. list-table::
+   :widths: 20 48 32
+   :header-rows: 1
+
+   * - Backend
+     - Capabilities
+     - Status
+   * - xgrammar
+     - JSON schema, regex, EBNF grammar, choice, structural tags
+     - Supported
+   * - guidance
+     - Full regex, JSON schema, EBNF grammar, choices, structural tags
+     - Not supported
+   * - outlines
+     - Regex, JSON schema, EBNF grammar, choices
+     - Not supported
+   * - lm-format-enforcer
+     - Regex, choice
+     - Not supported
+   * - faster-outlines
+     - Same as outlines, CPU-optimized
+     - Not supported
+
+Enabling guided decoding
+------------------------
+
+Select the xgrammar backend when starting the server with ``--structured-outputs-config``:
+
+.. code-block:: bash
+
+   --structured-outputs-config '{"backend": "xgrammar", "disable_any_whitespace": true}'
+
+Notes:
+
+- ``disable_any_whitespace`` tells xgrammar not to emit arbitrary white space, which keeps JSON
+  output compact. It's supported only by the xgrammar (and guidance) backends.
+- The backend is a server-side setting. Clients request a specific output format per request
+  (see `Making a guided request`_).
+
+Making a guided request
+-----------------------
+
+Guided decoding is requested per request using the OpenAI-standard ``response_format`` field.
+The example below constrains the output to a JSON object matching a schema:
+
+.. code-block:: bash
+
+   curl -sS -X POST "http://localhost:8000/v1/chat/completions" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "Qwen/Qwen2.5-VL-32B-Instruct",
+       "messages": [
+         {"role": "user", "content": "Describe a sunset over the ocean."}
+       ],
+       "response_format": {
+         "type": "json_schema",
+         "json_schema": {
+           "name": "Scene",
+           "schema": {
+             "type": "object",
+             "properties": {
+               "scene": {"type": "string"},
+               "lighting": {"type": "string"},
+               "mood": {"type": "string"}
+             },
+             "required": ["scene", "lighting", "mood"],
+             "additionalProperties": false
+           },
+           "strict": true
+         }
+       },
+       "max_tokens": 200,
+       "temperature": 0
+     }'
+
+vLLM also accepts other constraint types through the ``structured_outputs`` extra body, for
+example ``{"structured_outputs": {"choice": ["positive", "negative"]}}`` for a fixed set of
+choices, or ``regex`` / ``grammar`` for pattern and grammar constraints.
+
+.. note::
+
+   If the output comes back as free-form text rather than the requested format, confirm the
+   server was started with ``--structured-outputs-config`` and that the request uses
+   ``response_format`` (or ``structured_outputs``). Earlier request fields such as
+   ``guided_json`` are no longer used.
+
+Supported models
+----------------
+
+Guided decoding is a generic, model-agnostic vLLM feature - it constrains the sampled tokens
+and works with any text or vision-language model served through vLLM on Qualcomm Cloud AI.
+It has been validated with models such as ``meta-llama/Llama-3.3-70B-Instruct``,
+``Qwen/Qwen2.5-VL-32B-Instruct`` and ``Qwen/Qwen3-VL-32B-Instruct``.

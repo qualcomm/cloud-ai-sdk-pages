@@ -1,0 +1,83 @@
+Profiling support in runtime
+===============================
+
+.. _reference-to-profiling-support-in-runtime:
+
+The AIC100 stack provides mechanism to get performance metrics of
+key milestones through the inference cycle to triage low
+performance and for general monitoring.
+
+There are two broad classifications of profiling data:
+
+1. Host metrics: An inference passes through various software layers on the
+   host before it makes it to the network on device. Examining the
+   performance on the host helps identify if tweaking the network pre and post
+   processing stages or the host side multi-threading knobs is required.
+2. Network/device metrics: Network metrics include a wide-range of
+   information from whole network execution time to detailed
+   operator-level performance. Use this information to
+   make the most out of the existing network or to optimize the network itself.
+   
+   You must enable network performance collection during network compilation itself because it's not baked into the network by
+   default. The amount of network performance details present depends on the parameters
+   passed to the AIC compiler.
+
+Profiling report types
+------------------------
+
+You can use the AIC100 software stacks to request the following types (layouts) of profiling information:
+
+Latency type
+^^^^^^^^^^^^^^
+
+Latency type is a CSV style table of key of AIC100 stack. It contains both
+host and device side information.
+
+Trace type
+^^^^^^^^^^
+
+Trace type is a json formatted Chrome trace data. It can be viewed on
+any interface that consumes Chrome traces. It contains both host and device
+side information.
+
+Profiling report collection methods
+--------------------------------------
+
+There are two ways to request the profiling information from the AIC100 stack:
+
+1. Num-iter based profiling
+2. Duration based profiling
+
+The core content is the same in both mechanisms, just the delivery mechanism changes.
+
+.. _reference-to-num-iter-based-profiling:
+
+Num-iter based profiling
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Alias: Previous profiling
+
+When creating a profiling handle for num-iter based profiling, the user
+specifies:
+
+1. The program or programs to profile.
+2. The number of samples to collect.
+3. The profiling output type, such as latency or trace.
+
+After profiling is started, the profiling handle collects up to the configured
+number of samples. Reaching this limit doesn't automatically stop the
+profiling handle. The user must explicitly stop profiling to finalize
+collection.
+
+When profiling is stopped, any admitted in-flight samples are completed before
+profiling reports are written. Reports are written to the configured output
+directory, or to the current working directory if none is specified.
+
+A stopped profiling handle may be started again. Restarting it resets the
+previous collection state and begins a new profiling session.
+
+A profiling handle may be associated with one or more programs. Report files
+are generated for the applicable registered programs.
+
+See :ref:`ProfilingHandle <Cpp-API/runtime/index:ProfilingHandle>` for the
+HPP API interface.

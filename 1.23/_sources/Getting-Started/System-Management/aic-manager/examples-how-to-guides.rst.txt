@@ -1,0 +1,100 @@
+.. Imported from SDK 1.23.2.0: tools/aic-manager/docs/rst/examples-how-to-guides.rst.
+
+Create graphs and dashboards
+============================
+
+AICM and Prometheus
+-------------------
+
+.. raw:: html
+
+   <span id="id1"></span>
+
+Prometheus is an open-source systems monitoring toolkit that collects and stores metrics as time series data, allowing flexible queries and real-time alerting.
+
+AICM can serve data in a Prometheus-ready syntax using the following endpoints:
+
+1. Health and PCIe metrics: ``/aicm/health_data/prometheus_health_metrics``
+2. Reliability, Availability, Serviceability (RAS) error metrics: ``/aicm/health_data/prometheus_ras_metrics``
+
+After obtaining the Prometheus executable at `Prometheus <https://prometheus.io>`__, run it with a suitable configuration file:
+
+.. code-block:: bash
+
+   /prometheus --config.file=./prometheus.yml
+
+To set up integration, describe the scraping jobs in Prometheus.
+Example ``prometheus.yml``:
+
+.. code-block:: yaml
+
+   global:
+     scrape_interval: 2s
+     scrape_timeout: 2s
+
+   scrape_configs:
+     - job_name: 'health_polling'
+       static_configs:
+         - targets: ['127.0.0.1:4321']
+       metrics_path: '/aicm/health_data/prometheus_health_metrics'
+       basic_auth:
+         username: 'admin'
+         password: 'password'
+     - job_name: 'ras_polling'
+       static_configs:
+         - targets: ['127.0.0.1:4321']
+       metrics_path: '/aicm/health_data/prometheus_ras_metrics'
+       scrape_interval: 10s
+       scrape_timeout: 2s
+       basic_auth:
+         username: 'admin'
+         password: 'password'
+
+This setup configures ``health_polling`` and ``ras_polling`` jobs and provides basic auth credentials.
+More detailed configurations are available in `Prometheus Configuration <https://prometheus.io/docs/prometheus/latest/configuration/configuration/>`__.
+
+As of now, the suggested maximum scrape rate depends on the number of cards connected to the host.
+Rates from **5s to 250ms** work depending on card count.
+The ``scrape_duration_seconds`` metric in Prometheus can help choose best ``scrape_interval`` and ``scrape_timeout`` values.
+
+.. image:: resources/scrape_durations.png
+   :alt: Prometheus scrape duration guidance
+
+AICM and Grafana
+----------------
+
+Grafana is an open-source platform for exploring, querying, alerting, and visualizing collected metrics.
+The tool and docs are available at `Grafana <https://grafana.com/>`__.
+
+Prometheus and Grafana integration with AICM is a practical way to convert time-series metrics into useful visualizations.
+
+In ``/examples`` this repo provides an interactive dashboard using Grafana and Prometheus as data source.
+The example dashboard was built with **Grafana 10.3.3**.
+
+Import the example dashboard using the `Grafana import guide <https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/import-dashboards/>`__.
+
+The dashboard allows selecting available remote hosts and viewing metrics for one board or all AIC devices.
+
+.. image:: resources/Image1_AICM_Sample_Dashboard.png
+   :alt: AICM sample dashboard image 1
+
+.. image:: resources/Image2_AICM_Sample_Dashboard.png
+   :alt: AICM sample dashboard image 2
+
+.. image:: resources/Image3_AICM_Sample_Dashboard.png
+   :alt: AICM sample dashboard image 3
+
+.. image:: resources/Image4_AICM_Sample_Dashboard.png
+   :alt: AICM sample dashboard image 4
+
+Each panel shows a category of metrics, for example NSP, SOC, power, and RAS metrics, using time-series, stat, and gauge visualizations.
+
+Users can use this example as inspiration for personalized dashboards.
+
+Other Tools
+-----------
+
+Grafana and Prometheus are popular choices for metric visualization, but they are not the only options.
+Since AICM serves REST APIs, other tools can also be used to create dashboards and tooling.
+
+A simple example is available in ``/examples`` where Streamlit is used to build a basic dashboard.

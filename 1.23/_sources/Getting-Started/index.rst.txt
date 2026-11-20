@@ -1,0 +1,93 @@
+Cloud AI SDK overview
+======================
+
+The Qualcomm® Cloud AI SDK provides the software tools and libraries required to optimize, compile, and deploy machine learning models on Qualcomm Cloud AI 100 platforms. Designed for high-performance inference, the SDK streamlines the process of converting models into runtime binaries for both generative AI and computer vision applications. The Cloud AI SDK is divided into two components: the Apps SDK, used to prepare and compile models, and the Platform SDK, used to run, debug, and manage model binaries on Cloud AI hardware. It provides a complete workflow from initial model preparation to large-scale deployment and system management.
+
+About the SDKs
+---------------
+
+Use the Application (Apps) SDK to convert models and prepare runtime binaries for inference on :ref:`Cloud AI platforms <cloud-ai-platforms>` with `Qualcomm Cloud AI 100 accelerators <https://www.qualcomm.com/artificial-intelligence/data-center/cloud-ai-100-ultra>`__. The Apps SDK runs on a Linux development host and contains model development tools, a sophisticated parallelizing graph compiler, performance and integration tools, and code samples.
+
+The Platform SDK provides driver support for the Cloud AI accelerators, APIs and tools for executing and debugging model binaries, and tools for card health, monitoring, and telemetry. The Platform SDK consists of a kernel driver, userspace runtime with APIs and language bindings, and card firmware. The Platform SDK must be installed on the system where the accelerator cards are physically present.
+
+The following diagram shows the Cloud SDK stack, from model frameworks and compilation in the Apps SDK to runtime, drivers, APIs, and hardware support in the Platform SDK for execution on Cloud AI accelerators. 
+
+.. figure:: ../images/Plat_Apps_SDK.svg
+   :scale: 100%
+   
+   Cloud AI stack and functional areas
+
+The following table summarizes the key takeaways for each SDK.
+
+  .. list-table:: Cloud AI SDK summary
+    :header-rows: 1
+
+    * - **SDK**
+      - **Purpose**
+      - **Runs on**
+      - **Key tools/components**
+
+    * - Apps SDK
+      - Export, prepare, and compile models
+      - Linux host
+      - Compiler, dev libraries, code samples
+  
+    * - Platform SDK
+      - Run and manage binaries
+      - Hardware-attached Linux host
+      - Drivers, runtime, firmware, debug tools
+
+
+.. _cloud-ai-platforms:
+
+Cloud AI platforms
+------------------
+
+Qualcomm® Cloud AI 100 accelerators are accessible across a variety of deployment environments. The Cloud AI SDKs support workflows for the following platform types:
+
+.. only:: appliance
+
+  * On-Premises systems: Local hardware ranging from pre-integrated appliances, like the Dragonwing AI On-Prem Appliance, to custom-built servers equipped with AIC 100 PCIe cards. 
+
+  * Cloud instances: Pre-configured cloud environments with AIC 100 hardware, such as `AWS <https://qualcomm.github.io/cloud-ai-sdk-pages/latest/Getting-Started/Deployment/aws/index.html>`_ or `Cirrascale <https://www.cirrascale.com/ai-innovation-cloud/qualcomm-cloud-ai>`_.
+
+  * Edge & inference hosts: Specialized host systems tailored for deployment-only scenarios.
+
+  For hardware requirements and setup instructions for these environments, see :ref:`Deployment modes <deployment-modes>`. 
+
+.. only:: not appliance
+
+  * Cloud instances: Pre-configured cloud environments with AIC 100 hardware, such as `AWS <https://qualcomm.github.io/cloud-ai-sdk-pages/latest/Getting-Started/Deployment/aws/index.html>`_ or `Cirrascale <https://www.cirrascale.com/ai-innovation-cloud/qualcomm-cloud-ai>`_.
+  
+  * On-Premises systems: Local hardware equipped with AIC 100 PCIe cards.
+
+  * Edge & inference hosts: Specialized host systems tailored for deployment-only scenarios.
+
+  For detailed hardware requirements and setup instructions for these environments, see :ref:`Deployment Modes <deployment-modes>`. 
+
+Next steps
+------------
+
+* See :ref:`reference-to-quick-start-guide` for an example of how to run a sample model on Qualcomm Cloud AI platforms.
+
+* :doc:`Inference model workflow<Inference-Workflow/index>` details the Cloud AI SDK workflow and tool support—from onboarding a pre-trained model to deployment on Cloud AI platforms.
+
+* :doc:`SDK tools<SDK-Tools/index>` provides details on usage of the tools in the SDKs used in the Inference workflow as well as card management.
+
+* :doc:`System management<System-Management/index>`  details management for Cloud AI Platforms.
+
+* :doc:`Architecture <Architecture/index>` provides insights into the architecture of Cloud AI SoC and AI compute cores.
+
+* `Cloud AI release notes <https://docs.qualcomm.com/doc/80-PT790-123/80-PT790-123.pdf>`__ provide you with the new features, limitations and modifications in the Platform and Apps SDKs.
+
+
+* `Tutorials <https://github.com/qualcomm/cloud-ai-sdk/tree/main/tutorials>`__, in the form of Jupyter Notebooks walk you through the Cloud AI inference workflow as well as the tools used in the process. The tutorial divides the examples into CV and NLP folders to provide a better experience even though the inference workflows are quite similar.
+
+*  `Model recipes <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models>`__ provide you with the most performant and efficient way to run some of the popular models across categories. The recipe starts with the public model. The model is then exported to ONNX, some patches are applied if required, compiled and executed for best performance. You can use the recipe to integrate the compiled binary into their inference application.
+
+* `Sample code <https://github.com/qualcomm/cloud-ai-sdk/tree/main/samples>`__ helps you get familiar with the usage of Python and C++ APIs for inferencing on Cloud AI platforms.
+
+..
+  * `SDK Tools <https://docs.qualcomm.com/bundle/publicresource/topics/80-PT790-993B/introduction_tools.html>`__ provides details on the usage of the tools used in the Inference workflow as well as card management.
+
+
