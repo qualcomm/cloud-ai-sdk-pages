@@ -1,0 +1,13 @@
+.. Metrics synchronized from SDK 1.23.2.0: tools/aic-manager/docs/rst/metrics.csv.
+
+Metrics
+========
+
+AICM provides device health, PCIe traffic, DDR bandwidth, and RAS error metrics.
+The field names below match the API response models; the reference is maintained
+in ``metrics.csv``.
+
+.. csv-table::
+   :file: metrics.csv
+   :header-rows: 1
+   :widths: 30, 30, 50

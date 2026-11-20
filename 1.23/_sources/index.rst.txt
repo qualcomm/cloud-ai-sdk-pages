@@ -1,0 +1,227 @@
+:hide-navigation:
+
+.. toctree::
+   :caption: User Guide
+   :hidden:
+   :titlesonly:
+
+   Cloud AI SDK overview <Getting-Started/index>
+   Getting-Started/Quick-Start-Guide/index
+   Getting-Started/verify-setup
+   Inference and deployment workflow <Getting-Started/Inference-Workflow/index>
+   Getting-Started/Features/index
+   Getting-Started/Model-Architecture-Support/index
+   Getting-Started/System-Management/index
+   Hardware architecture <Getting-Started/Architecture/index>
+   Getting-Started/SDK-Tools/index
+   Getting-Started/Glossary/index
+   Getting-Started/programming-interfaces
+
+.. toctree::
+   :caption: FAQ
+   :hidden:
+
+   FAQ/index
+
+.. toctree::
+   :caption: Blogs
+   :hidden:
+
+   blogs/Train_Anywhere/train_anywhere/index
+   blogs/Speculative_Decode/spec_decode_ai100/index
+   blogs/AmberChat/index
+   blogs/Text_Embeddings/index
+   blogs/Microscaling/microscaling/index
+
+Qualcomm Cloud AI Documentation
+===============================
+
+Qualcomm Cloud AI SDKs (Platform and Apps) enable high performance deep
+learning inference on Qualcomm Cloud AI platforms delivering high
+throughput and low latency across Computer Vision, Object Detection,
+Natural Language Processing and Generative AI models. The SDKs enable end 
+to end workflows - from onboarding a pre-trained model to deployment of
+the ML inference application in production.
+
+------------
+
+Get started
+-----------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+   :class-container: qaic-home-card-grid
+
+   .. grid-item-card:: |tile-icon| Cloud AI SDK overview
+        :link: Getting-Started/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Learn about the SDK components, supported platforms, and inference workflows.
+
+   .. grid-item-card:: |tile-icon| Verify setup
+        :link: Getting-Started/verify-setup
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Choose cloud instances or a local server, download SDKs, and verify installation.
+
+   .. grid-item-card:: |tile-icon| Quick start guide
+        :link: Getting-Started/Quick-Start-Guide/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Run your first model on Cloud AI accelerators.
+
+------------
+
+.. _key-tasks:
+
+User guide
+----------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+   :class-container: qaic-home-card-grid
+
+   .. grid-item-card:: |tile-icon| Inference and deployment workflow
+        :link: Getting-Started/Inference-Workflow/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Prepare, export, compile, run, deploy, and serve models.
+
+   .. grid-item-card:: |tile-icon| Run the model
+        :link: Getting-Started/Inference-Workflow/run-model
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Run models with PyTorch or a compiled QPC.
+
+   .. grid-item-card:: |tile-icon| Advanced model techniques
+        :link: Getting-Started/Features/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Use custom operations, model sharding, and object detection postprocessing.
+
+   .. grid-item-card:: |tile-icon| Model architecture
+        :link: Getting-Started/Model-Architecture-Support/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Explore supported model families and the transformer-decoder LLM guide.
+
+   .. grid-item-card:: |tile-icon| System management
+        :link: Getting-Started/System-Management/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Manage devices and collect health, logs, and telemetry with AIC Manager.
+
+   .. grid-item-card:: |tile-icon| Hardware architecture
+        :link: Getting-Started/Architecture/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Understand Cloud AI accelerator cards, SoCs, cores, and memory.
+
+   .. grid-item-card:: |tile-icon| SDK tools
+        :link: Getting-Started/SDK-Tools/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Find command-line references for compilation, execution, and device management.
+
+   .. grid-item-card:: |tile-icon| Glossary
+        :link: Getting-Started/Glossary/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Look up Cloud AI SDK terminology and abbreviations.
+
+------------
+
+Serving and deployment
+----------------------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+   :class-container: qaic-home-card-grid
+
+   .. grid-item-card:: |tile-icon| vLLM
+        :link: Getting-Started/Model-Serving/vLLM-Serving/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Serve models with compiled or PyTorch eager execution modes.
+
+   .. grid-item-card:: |tile-icon| Triton Inference Server
+        :link: Getting-Started/Model-Serving/Triton-Serving/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Deploy inference workloads with Triton backends.
+
+   .. grid-item-card:: |tile-icon| TGI
+        :link: Getting-Started/Model-Serving/TGI-Serving/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Serve language models with Text Generation Inference.
+
+   .. grid-item-card:: |tile-icon| Docker
+        :link: Getting-Started/Deployment/Docker/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Select, build, and run inference containers.
+
+   .. grid-item-card:: |tile-icon| Kubernetes
+        :link: Getting-Started/Deployment/Kubernetes/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Schedule accelerator workloads and deploy llm-d for production LLM serving.
+
+   .. grid-item-card:: |tile-icon| OpenShift
+        :link: Getting-Started/Deployment/OpenShift/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Deploy Cloud AI workloads using the Qualcomm Cloud AIC Operator.
+
+------------
+
+Programming interfaces
+----------------------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+   :class-container: qaic-home-card-grid
+
+   .. grid-item-card:: |tile-icon| Python
+        :link: Python-API/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Python runtime API reference.
+
+   .. grid-item-card:: |tile-icon| C++
+        :link: Cpp-API/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        C++ runtime API reference.
+
+   .. grid-item-card:: |tile-icon| ONNX Runtime
+        :link: onnxrt-qaic/index
+        :link-type: doc
+        :class-card: qaic-home-card
+
+        Integrate Cloud AI acceleration with ONNX Runtime.
+
+.. |tile-icon| image:: images/icons/icn-book-blue.svg
+   :width: 24px
+   :alt:
+

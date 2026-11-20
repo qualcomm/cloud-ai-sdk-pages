@@ -1,0 +1,188 @@
+QAIC Integration
+================
+
+This page covers setting up the llm-d repos with QAIC patches, generating the model
+service configuration, and installing required cluster components.
+
+For the full reference, see ``/opt/qti-aic/integrations/llmd/README.md``.
+
+.. _llmd-integration-prerequisites:
+
+Prerequisites
+-------------
+
+A working Kubernetes cluster (v1.33.0+) with the QAIC device plugin running is required
+before proceeding. See :doc:`/Getting-Started/Deployment/Kubernetes/index` for cluster
+and device plugin setup instructions.
+
+Ensure the following client tools are installed:
+
+.. code-block:: bash
+
+   kubectl version --client          # v1.33.0+
+   helm version                      # v3.12.0+
+   helmfile --version                # v1.1.0+
+   yq --version                      # v4+
+   jq --version
+   helm plugin list | grep diff      # helm-diff v3.10.0+
+
+Install ``helmfile`` and ``helm-diff`` if not present:
+
+.. code-block:: bash
+
+   # helmfile
+   curl -L https://github.com/helmfile/helmfile/releases/latest/download/helmfile_linux_amd64.tar.gz | tar xz
+   sudo mv helmfile /usr/local/bin/
+
+   # helm-diff plugin
+   helm plugin install https://github.com/databus23/helm-diff
+
+Install Leader Worker Set (required for multi-pod and multi-node workloads):
+
+.. code-block:: bash
+
+   kubectl apply --server-side -f \
+     https://github.com/kubernetes-sigs/lws/releases/download/v0.7.0/manifests.yaml
+
+   # Verify
+   kubectl get pods -n lws-system
+
+Clone and Patch the Repos
+--------------------------
+
+Both ``llm-d-modelservice`` and ``llm-d`` must be checked out and patched. They must
+reside at the **same directory level** — helmfile resolves the chart path relatively
+between them.
+
+.. code-block:: bash
+
+   # 1. Clone llm-d-modelservice first and apply QAIC patch
+   git clone https://github.com/llm-d-incubation/llm-d-modelservice.git
+   pushd llm-d-modelservice
+   git checkout llm-d-modelservice-v0.4.9
+   git apply /opt/qti-aic/integrations/llmd/qaic_llm_d_modelservice_0.4.9.patch
+   popd
+
+   # 2. Clone llm-d and apply QAIC patch
+   git clone https://github.com/llm-d/llm-d.git
+   pushd llm-d
+   git checkout v0.6.0
+   git apply /opt/qti-aic/integrations/llmd/qaic_llm_d_0.6.0.patch
+   popd
+
+Required directory layout after cloning:
+
+.. code-block:: text
+
+   <parent>/
+   ├── llm-d-modelservice/
+   │   └── charts/
+   │       └── llm-d-modelservice/
+   └── llm-d/
+       └── guides/
+           ├── pd-disaggregation/
+           └── workload-autoscaling/
+
+.. warning::
+
+   ``helmfile apply -e qaic`` will fail with ``chart not found`` if
+   ``llm-d-modelservice`` is not a sibling directory of ``llm-d``.
+
+   The helmfile lives at ``llm-d/guides/pd-disaggregation/helmfile.yaml.gotmpl``
+   and resolves the chart by climbing three directory levels up to reach the parent,
+   then stepping into the sibling repo:
+
+   .. code-block:: text
+
+      <parent>/                          ← three levels up from the helmfile
+      ├── llm-d/
+      │   └── guides/
+      │       └── pd-disaggregation/
+      │           └── helmfile.yaml      ← helmfile lives here
+      └── llm-d-modelservice/            ← chart must be here, at the same level as llm-d
+          └── charts/
+              └── llm-d-modelservice/
+
+   If ``llm-d-modelservice`` is in a different location, the path cannot resolve
+   and the deployment fails before any pod is created.
+
+Generate the Model Service YAML
+---------------------------------
+
+The SDK ships a configuration generator that creates the ``values_qaic.yaml`` used
+by helmfile. Run it from inside the vLLM environment:
+
+.. code-block:: bash
+
+   source /opt/vllm-env/bin/activate
+
+   python3 /opt/qti-aic/integrations/vllm/qaic_disagg/llmd_config_gen.py \
+     --image        <YOUR_QAIC_VLLM_IMAGE> \
+     --qpc-path     <PATH_TO_QPC> \
+     --model        <HF_MODEL_ID> \
+     --qeff-home    <QEFF_CACHE_DIR> \
+     --hf-home      <HF_CACHE_DIR>
+
+Copy the generated file to the pd-disaggregation guide folder:
+
+.. code-block:: bash
+
+   cp values.yaml llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+
+.. note::
+
+   Review all ``# USER:`` placeholders in the generated file before deploying.
+   See :doc:`disaggregation` for variant-specific overrides (LMCache, E-PD, multi-node).
+
+QPC Availability
+-----------------
+
+QPCs must be accessible at the path set in ``VLLM_QAIC_QPC_PATH``. Two options:
+
+**Node-local (single host):** Pre-compile and place the QPC on each QAIC-equipped worker
+node at a consistent path. Pods access it via a ``hostPath`` volume.
+
+**NFS / PVC (multi-node):** Mount a shared PersistentVolumeClaim backed by NFS so the
+same QPC is accessible across all nodes. Required for multi-node deployments with the
+LMCache connector.
+
+Install the Gateway Provider (Istio)
+-------------------------------------
+
+llm-d uses Istio as the default gateway provider. Other gateway implementations have
+not been validated.
+
+.. code-block:: bash
+
+   cd llm-d/guides/prereq/gateway-provider/
+
+   # Optional: clean up any previously installed gateway components
+   ./install-gateway-provider-dependencies.sh delete
+
+   # Install gateway dependencies and Istio
+   ./install-gateway-provider-dependencies.sh
+   helmfile apply -f istio.helmfile.yaml
+
+Verify the Gateway API Inference Extension CRDs are installed:
+
+.. code-block:: bash
+
+   kubectl api-resources --api-group=inference.networking.k8s.io
+
+Expected output:
+
+.. code-block:: text
+
+   NAME             SHORTNAMES   APIVERSION                       NAMESPACED   KIND
+   inferencepools   infpool      inference.networking.k8s.io/v1   true         InferencePool
+
+Teardown
+--------
+
+.. code-block:: bash
+
+   # Remove Istio and gateway API CRDs
+   cd llm-d/guides/prereq/gateway-provider/
+   helmfile destroy -f istio.helmfile.yaml
+   ./install-gateway-provider-dependencies.sh delete
+   kubectl delete namespace istio-system --ignore-not-found

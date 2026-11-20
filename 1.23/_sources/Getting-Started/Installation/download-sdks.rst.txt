@@ -1,0 +1,86 @@
+.. _reference-to-download-sdks:
+
+=============
+Download SDKs
+=============
+
+The Platform SDK and Apps SDK are available from `Qualcomm Software Center <https://softwarecenter.qualcomm.com/>`__.
+
+**What You Need**
+
+- Platform SDK: Drivers, firmware, and runtime libraries
+- Apps SDK: Compilation tools and development libraries
+
+
+Direct downloads
+----------------
+
+Use the latest version unless you need to match an existing deployment or container image.
+The direct links download the SDK zip files for Linux from Qualcomm Software Center.
+
+.. list-table::
+   :widths: 16 18 33 33
+   :header-rows: 1
+
+   * - Version
+     - Status
+     - Platform SDK
+     - Apps SDK
+   * - 1.23.2.0
+     - Latest
+     - `Download Platform SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_platform/Linux/Debian/1.23.2.0/aic_platform.Core.1.23.2.0.Linux-AnyCPU-aic_platform.Core.1.23.2.0.Linux-AnyCPU.zip>`__
+     - `Download Apps SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_apps/Linux/Debian/1.23.2.0/aic_apps.Core.1.23.2.0.Linux-AnyCPU-aic_apps.Core.1.23.2.0.Linux-AnyCPU.zip>`__
+   * - 1.21.6.0
+     - Previous
+     - `Download Platform SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_platform/Linux/Debian/1.21.6.0/aic_platform.Core.1.21.6.0.Linux-AnyCPU-aic_platform.Core.1.21.6.0.Linux-AnyCPU.zip>`__
+     - `Download Apps SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_apps/Linux/Debian/1.21.6.0/aic_apps.Core.1.21.6.0.Linux-AnyCPU-aic_apps.Core.1.21.6.0.Linux-AnyCPU.zip>`__
+   * - 1.21.4.0
+     - Previous
+     - `Download Platform SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_platform/Linux/Debian/1.21.4.0/aic_platform.Core.1.21.4.0.Linux-AnyCPU-aic_platform.Core.1.21.4.0.Linux-AnyCPU.zip>`__
+     - `Download Apps SDK <https://softwarecenter.qualcomm.com/api/download/software/sdks/aic_apps/Linux/Debian/1.21.4.0/aic_apps.Core.1.21.4.0.Linux-AnyCPU-aic_apps.Core.1.21.4.0.Linux-AnyCPU.zip>`__
+
+.. note::
+   The Linux (Debian) download option includes Debian and RPM packages for x86-64.
+
+Other download options
+----------------------
+
+To browse all available versions and packages, open the SDK pages in Qualcomm Software Center:
+
+* `Platform SDK <https://softwarecenter.qualcomm.com/catalog/item/aic_platform>`__
+* `Apps SDK <https://softwarecenter.qualcomm.com/catalog/item/aic_apps>`__
+
+SDK package contents
+--------------------
+
+**Platform SDK**
+
+Filename format: ``aic_platform.Core.<version>.Linux-AnyCPU.zip``
+
+Example: ``aic_platform.Core.1.23.2.0.Linux-AnyCPU.zip``
+
+.. code-block:: text
+
+   ├── x86_64/
+   │   ├── deb/          # Debian packages for x86-64
+   │   └── rpm/          # RPM packages for x86-64
+   └── common/           # Shared test data and tools
+
+**Apps SDK**
+
+Filename format: ``aic_apps.Core.<version>.Linux-AnyCPU.zip``
+
+Example: ``aic_apps.Core.1.23.2.0.Linux-AnyCPU.zip``
+
+.. code-block:: text
+
+   ├── x86_64/
+   │   ├── deb/          # Debian packages for x86-64
+   │   └── rpm/          # RPM packages for x86-64
+   └── common/           # Examples, integrations, and tools
+
+Next steps
+----------
+
+* :doc:`Install the Platform SDK <platform-sdk>`.
+* :doc:`Install the Apps SDK <apps-sdk>`.

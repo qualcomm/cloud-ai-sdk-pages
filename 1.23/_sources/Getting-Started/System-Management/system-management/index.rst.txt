@@ -1,0 +1,325 @@
+.. _reference-to-system-management-tasks:
+
+System management
+==================
+
+.. only:: appliance
+   
+   Prerequisites
+   ---------------
+
+   The Cloud AI Platform SDK is required for ``qaic-util`` usage. The `Qualcomm Dragonwing AI On-Prem <https://docs.qualcomm.com/doc/80-92111-1/topic/on-prem-appliance.html>`__  appliance box is preloaded with the Platform SDK. For more information on downloading the SDK, see :ref:`reference-to-download-sdks`. 
+
+
+Use ``qaic-util`` for system management
+----------------------------------------
+
+The ``qaic-util`` command-line utility interface enables you to query the following:
+
+-  Card and SoC health
+-  Firmware version
+-  Compute, memory, and IO resources available vs in-use
+-  Card power and temperature
+-  Status of certain device capabilities like ECC
+
+
+``QID``, the ``deviceID`` are identifiers (integers) assigned to each
+AI 100 SoC present in the system. Some SKUs can contain
+more than one AI 100 SoC per card.
+
+``qaic-util`` displays information in the following formats:
+
+-  Detailed view where cards/SoCs are queried once and the parameters
+   are listed one per line.
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -q 
+   sudo /opt/qti-aic/tools/qaic-util -q  -d <QID#> #To display information for a specific `QID`
+
+-  Tabular format where certain parameters (compute, IO, power,
+   temperature etc) are listed in a tabular format, refreshed every 'n'
+   seconds (user input)
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -t 1  # Here, -t 1 means refreshed every 1 second
+   sudo /opt/qti-aic/tools/qaic-util -t 1 -d <QID#> #To display information for a specific `QID`
+
+-  Tree format where certain parameters (PCIe BDF address, MHI ID,
+   device node name, status) are listed in a tree structure organized by
+   card. This view is useful for understanding the PCIe topology and
+   visualizing multi-soc cards like Cloud AI 100 Ultra.
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -r
+   sudo /opt/qti-aic/tools/qaic-util -r -v # View detailed PCIe topology
+
+``qaic-util``, provides -filter(-f) option along with -q and -t options,
+which can filter by certain device properties. Also to dump output to
+the .json file by using -j option.
+
+Examples: To display information for a specific ``Card``.
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -q -f "Board serial==<BOARD_SERIAL_OF_CARD>"
+
+To display information for a specific ``Card`` in tabular format.
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -t 1 -f "Board serial==<BOARD_SERIAL_OF_CARD>"   # Here, -t 1 means refreshed every 1 second
+
+To dump output from the qaic-util, option -j can be used,
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -j <output-file-name>.json -f "Board serial==<BOARD_SERIAL_OF_CARD>"
+
+Developers can ``grep`` for keywords like ``Status``, ``Capabilities``,
+``Nsp``, ``temperature``, ``power`` to get specific information from the
+cards/SoCs.
+
+.. _reference-to-card-health-function:
+
+Verify card health
+--------------------
+
+``Status`` field indicates the health of the card.
+
+-  ``Ready`` indicates card is in good health.
+-  ``Error`` indicates card is in error condition or user lacks
+   permissions (use ``sudo``).
+
+::
+
+   sudo /opt/qti-aic/tools/qaic-util -q | grep -e Status -e QID
+   QID 0
+           Status:Ready
+   QID 1
+           Status:Ready
+   QID 2
+           Status:Ready
+   QID 3
+           Status:Ready
+
+
+Verify the function steps can be used to run a sample workload on ``QIDs`` to ensure that the hardware and software are functioning correctly.
+
+.. _reference-to-soc-reset:
+
+Reset the SoC
+-------------------
+
+You can reset the QIDs to recover the SoCs if they generate an
+``Error``. You can use the ``MHI ID`` or the ``pci address`` of the ``QID`` for the 
+specific ``soc_reset``. The MHI and QID don't always map to the same integer.
+You must identify the mapping before issuing the ``soc_reset``. Also, there is an option
+to reset all the ``QIDs``.
+
+* Reset the SoC using the ``MHI ID`` associated with the ``QID``.
+
+  1.  Identify the ``MHI ID`` associated with the ``QID``
+
+   ::
+
+      sudo /opt/qti-aic/tools/qaic-util -q | grep -e MHI -e QID
+
+   In the sample output below, ``QID 0`` is associated with ``MHI ID:0``.
+
+   ::
+      
+       QID 0 MHI ID:0 QID 1 MHI ID:1 QID 2 MHI ID:2 QID 3 MHI ID:3
+
+  2.  Reset the SoC using the `MHI ID` associated with the `QID`. 
+   
+   ::
+
+      sudo su
+      echo 1 > /sys/bus/mhi/devices/mhi/soc_reset #MHI ID is
+      0,1,2…
+
+* Reset the SoC using the ``pci address`` associated with the ``QID``.
+
+  1. Find the ``pci address`` associated with the ``QID``.
+
+      ::
+
+        sudo /opt/qti-aic/tools/qaic-util -q -d 1 | grep -iw "pci address"
+
+   The following example output shows the ``PCI address``:
+   
+   ::
+      
+      PCI Address:0000:2d:00.0
+
+  2. Reset the SoC using the address associated with the ``QID``.
+
+      ::
+
+        sudo /opt/qti-aic/tools/qaic-util -s -p 0000:2d:00.0
+
+   The following example output indicates that the reset was successful.
+   
+   ::
+
+      Resetting 0000:2d:00.0:  0000:2d:00.0 success
+
+* Do the following to reset all QIDs. 
+  
+   ::
+   
+    sudo /opt/qti-aic/tools/qaic-util -s``
+
+After resetting the SoC, :ref:`verify the health and functionality <reference-to-card-health-function>`  of the SoCs/Cards.
+
+
+Use ``network_mode`` to improve network performance
+-----------------------------------------------------
+
+Use QMonitor and the ``network_mode`` parameter to enable or disable the LLM network mode for the Ultra SKU. The ``MODE_LLM`` 
+setting helps the LLM network performance. This mode is enabled by default. Disable this setting and enable the ``MODE_NON_LLM`` setting for non-LLM networks.
+
+The following example QMonitor commands show how to check the current mode, enable network mode, and disable network mode. For more information about QMonitor, see
+`QMonitor <https://docs.qualcomm.com/bundle/resource/topics/80-PT790-995E/qmonitor.html>`__.
+
+
+* To check the current mode, do the following:
+
+  1. Create a ``getReq.json`` file like the following example:
+
+     .. code-block:: json
+
+        {
+          "request": [
+            {
+              "qid": 0,
+              "power": {
+                "get_network_mode_request": {}
+              }
+            }
+          ]
+        }
+
+  2. Run the following command:
+
+     .. code-block:: bash
+
+        sudo /opt/qti-aic/tools/qaic-monitor-json -i ./getReq.json
+
+     The following example output response indicates that the current network mode is ``MODE_NON_LLM``.
+
+     .. code-block:: json
+
+        {
+          "response": [
+            {
+              "qid": 0,
+              "power": {
+                "get_network_mode_response": {
+                  "status": "SUCCESS",
+                  "network_mode": "MODE_NON_LLM",
+                  "mode_status": "NETWORK_MODE_RESPONSE_SUCCESS"
+                }
+              }
+            }
+          ]
+        }
+
+* To enable LLM mode, do the following:
+
+  1. Create a ``setEnableReq.json`` file like the following example:
+
+     .. code-block:: json
+
+        {
+          "request": [
+            {
+              "qid": 0,
+              "power": {
+                "set_network_mode_request": {
+                  "network_mode": "MODE_LLM"
+                }
+              }
+            }
+          ]
+        }
+
+  2. Run the following command:
+
+     .. code-block:: bash
+
+        sudo /opt/qti-aic/tools/qaic-monitor-json -i ./setEnableReq.json
+
+     The following output response indicates that the request was successful.
+
+     .. code-block:: json
+
+        {
+          "response": [
+            {
+              "qid": 0,
+              "power": {
+                "set_network_mode_response": {
+                  "status": "SUCCESS",
+                  "mode_status": "NETWORK_MODE_RESPONSE_SUCCESS"
+                }
+              }
+            }
+          ]
+        }
+
+* To disable LLM mode, do the following:
+
+  1. Create a ``setDisable.json`` file like the following example:
+
+     .. code-block:: json
+
+        {
+          "request": [
+            {
+              "qid": 0,
+              "power": {
+                "set_network_mode_request": {
+                  "network_mode": "MODE_NON_LLM"
+                }
+              }
+            }
+          ]
+        }
+
+  2. Run the following command:
+
+     .. code-block:: bash
+
+        sudo /opt/qti-aic/tools/qaic-monitor-json -i ./setDisable.json
+
+     The following output response indicates that the request was successful.
+
+     .. code-block:: json
+
+        {
+          "response": [
+            {
+              "qid": 0,
+              "power": {
+                "set_network_mode_response": {
+                  "status": "SUCCESS",
+                  "mode_status": "NETWORK_MODE_RESPONSE_SUCCESS"
+                }
+              }
+            }
+          ]
+        }
+
+
+Next steps
+--------------------------
+
+* For advanced system management details, refer to `Cloud AI Card
+  Management <https://docs.qualcomm.com/bundle/resource/topics/80-PT790-995F>`__ and for specific Ultra card related details, see `Cloud AI Ultra Card
+  Management <https://docs.qualcomm.com/bundle/resource/topics/80-PT790-996A>`__.
+
+* You can also use Python APIs to monitor the health and resources of the cards/SoCs. See :ref:`Util class <reference-to-python-api-class-util>` for more information.

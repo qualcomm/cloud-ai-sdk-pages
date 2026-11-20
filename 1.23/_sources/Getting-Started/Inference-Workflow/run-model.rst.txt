@@ -1,0 +1,24 @@
+Run the model
+#############
+
+Choose how to run your model on Cloud AI accelerators:
+
+* :doc:`PyTorch workflow <../PyTorch-Workflow/Eager-Mode-Finetune/index>`:
+  run PyTorch models directly with ``torch_qaic`` in eager mode or use
+  ``torch.compile``. This route doesn't require ONNX export or QPC generation
+  beforehand. The workflow also covers custom operators and fine-tuning.
+* :doc:`Run a compiled QPC <model-execution/index>`:
+  run a model that has been :ref:`compiled into a QPC <reference-to-compile-the-model>`
+  using ``qaic-runner``, the Python or C++ APIs, or ONNX Runtime. This route
+  provides ahead-of-time graph optimizations and QPC profiling tools.
+
+Choose based on your model's operator support, development needs, and
+performance requirements. For inference endpoints, see
+:doc:`Serve the model <../Model-Serving/index>`.
+
+.. toctree::
+   :titlesonly:
+   :hidden:
+
+   ../PyTorch-Workflow/Eager-Mode-Finetune/index
+   Run a compiled QPC <model-execution/index>

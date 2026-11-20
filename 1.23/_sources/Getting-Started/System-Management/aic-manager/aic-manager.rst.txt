@@ -1,0 +1,51 @@
+AIC Manager
+===========
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   user-guide
+   metrics
+   feature-overview
+   cli
+   diagnostics-how-to
+   examples-how-to-guides
+
+AIC Manager (AICM) provides REST APIs for monitoring Cloud AI 100 devices.
+Use these APIs with administration dashboards, monitoring frameworks, and
+automation tools to:
+
+* Collect telemetry, including device health, PCIe traffic, DDR bandwidth,
+  and reliability, availability, and serviceability (RAS) errors.
+* Monitor device health and run diagnostic tests with the Field Diagnostics Tool.
+* Group devices and configure policies that send alerts when metric thresholds
+  are exceeded.
+
+AICM is installed with the SDK in ``/opt/qti-aic/tools/aic-manager``.
+QMonitor must be running on the same host before AICM starts.
+
+API documentation
+-----------------
+
+When AICM is running, use either interface to explore its APIs:
+
+* Swagger UI: ``http://<IP>:<PORT>/docs`` provides interactive API documentation.
+* Redoc: ``http://<IP>:<PORT>/redoc`` provides a browsable API reference.
+
+Replace ``<IP>:<PORT>`` with the address and port where AICM is running.
+
+Next steps
+----------
+
+* :doc:`Install, configure, and start AICM <user-guide>`.
+* Review :doc:`metrics` and the :doc:`feature-overview`.
+* Use the :doc:`AICMI command line interface <cli>` for metric retrieval,
+  device groups, and policies.
+* :doc:`Run diagnostic tests and read their results <diagnostics-how-to>`.
+* :doc:`Create graphs and dashboards with Prometheus and Grafana <examples-how-to-guides>`.
+
+
+
+
+

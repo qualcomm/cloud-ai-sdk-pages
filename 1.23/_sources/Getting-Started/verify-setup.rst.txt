@@ -1,0 +1,39 @@
+.. _verify-setup:
+
+Verify setup
+==============
+
+.. only:: appliance
+   
+   The Cloud AI SDKs and Cloud AI 100 inference cards are preloaded and preinstalled in commercially available AI On-Prem Appliances. As part of setting up the appliance box, you should work with your system administrators to ensure that the Cloud AI SDKs and AI 100 cards are installed properly. See `Appliance setup overview <https://docs.qualcomm.com/doc/80-92111-1/topic/appliance-setup-overview.html>`_ for information on how to verify the appliance box setup. 
+   
+   The following Cloud AI SDK installation instructions are provided here are for reference purposes. 
+
+   .. toctree::
+      :titlesonly:
+      :maxdepth: 1
+   
+      Installation/sdk-installation
+      Installation/prerequisites
+      Installation/download-sdks
+      Installation/platform-sdk
+      Installation/apps-sdk
+
+
+.. only:: not appliance
+
+   Choose your setup path for Qualcomm Cloud AI accelerators:
+
+   .. toctree::
+      :maxdepth: 1
+      :titlesonly:
+
+      Installation/index
+
+   * :ref:`Cloud instances <reference-to-cloud-instances>`: use preconfigured
+     AWS or Cirrascale instances. If the SDKs are already installed, continue to
+     the :doc:`Quick start guide <Quick-Start-Guide/index>`.
+   * :ref:`Local servers <reference-to-local-server-install>`: check hardware
+     and OS requirements, download and install the SDKs, and verify the setup.
+   * :ref:`Virtual machines <reference-to-vm-install>`: configure supported
+     hypervisors and PCIe passthrough.

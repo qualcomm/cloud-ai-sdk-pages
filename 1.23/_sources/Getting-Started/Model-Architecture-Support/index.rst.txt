@@ -1,0 +1,78 @@
+Model architecture
+==================
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   Large-Language-Models/llm/index
+
+The Cloud AI 100 family of accelerators supports a comprehensive range
+of model architectures and use cases.
+
+-  `Transformer
+   encoders <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/language_processing/encoder>`__
+-  `Transformer
+   decoders <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/language_processing/decoder>`__
+-  `Computer
+   vision <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/vision>`__
+   - CNN, R-CNN, vision transformers
+-  `Diffusion <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/multimodal/text_to_image>`__
+
+
+Model architecture fit guidelines
+---------------------------------
+
+The following image provides a block diagram of the Cloud AI 100 Ultra card. For the standard and pro SKUs, the number of SoCs per card is one instead of four.
+
+.. image:: ../../images/ultra_in_a_nutshell.png
+   :width: 500px
+
+-  AI core - This is the smallest compute unit on which a neural network
+   can be executed.
+-  SoC - This is the system-on-chip that contains up to 16 AI cores.
+-  Accelerator card - This is a single width PCIe form-factor card that
+   contains one or more SoCs.
+
+Cloud AI 100 accelerator architecture is flexible and provides knobs to
+tune for highest throughput or lowest latency or a balance of both. The following table describes the categories of models that are supported across
+SKUs. One or more cards may be required to
+execute the inference based on the model size, batch size, input and output sizes, and data
+types used for activations and weights, you can combine multiple :doc:`AI 100 SoCs <../Architecture/index>` with dedicated DDR memory,
+stacked on a accelerator card (SKUs) and/or on the server to
+run very large models.
+
+================================ ======== === =====
+Model family                     Standard Pro Ultra
+================================ ======== === =====
+Transformer encoders             Yes      Yes Yes
+Transformer decoders             Yes      Yes Yes
+Computer vision (CNN, R-CNN etc) Yes      Yes Yes
+Diffusion                        Yes      Yes Yes
+================================ ======== === =====
+
+Refer to `model recipes <https://github.com/qualcomm/cloud-ai-sdk>`__ in the
+``cloud-ai-sdk`` repo for details on the number of cores used for all
+categories of models for highest throughput vs lowest latency.
+
+Models (2B parameters and below) are performant in a single SoC.
+
+For LLMs (7B parameters and above), the least latency is achieved in
+most cases through model sharding where the model is tensor-sliced and
+run across multiple SoCs (or cards). See :ref:`Model sharding
+feature <reference_to_model_sharding>` for more information.
+
+See :ref:`performance tuning
+overview <reference_to_tune_performance>`
+for some more details on the knobs used to tune performance.
+
+Next steps
+-----------
+
+* Learn about the execution of :ref:`transformer decoder based LLMs<decoder-llm>` on Cloud AI 100 accelerators.
+
+*  Run scripts and see examples for `transformer encoders <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/language_processing/encoder>`__, `transformer decoders <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/language_processing/decoder>`__,  `computer vision <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/vision>`__ (CNN, R-CNN, vision transformers), and `diffusion <https://github.com/qualcomm/cloud-ai-sdk/tree/main/models/multimodal/text_to_image>`__ model architectures.
+  
+* See `model recipes <https://github.com/qualcomm/cloud-ai-sdk>`__ in the ``cloud-ai-sdk`` repository for details on the number of cores used for all categories of models for highest throughput vs. lowest latency.
+
+

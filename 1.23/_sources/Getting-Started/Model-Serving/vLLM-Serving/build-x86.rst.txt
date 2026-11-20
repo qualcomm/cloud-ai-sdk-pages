@@ -1,0 +1,169 @@
+Build for x86_64
+================
+
+vLLM support for Qualcomm Cloud AI is provided by the ``vllm-qaic`` plugin,
+which installs on top of upstream vLLM. The plugin supports two execution
+modes, and each mode is installed into its own Python virtual environment.
+See :doc:`Execution-Modes` to choose a mode.
+
+.. list-table::
+   :widths: 34 33 33
+   :header-rows: 1
+
+   * - Component
+     - AoT mode
+     - PyT mode (experimental)
+   * - vLLM
+     - 0.23.0
+     - 0.23.0
+   * - vllm-qaic
+     - 1.23
+     - 1.23
+   * - torch
+     - 2.7.0+cpu
+     - 2.13.0+cpu
+   * - torchvision
+     - 0.22.0+cpu
+     - 0.28.0+cpu
+   * - torchaudio
+     - -
+     - 2.11.0+cpu
+   * - QEfficient
+     - ``release/v1.23.0``
+     - -
+   * - torch_qaic
+     - -
+     - 0.1.0
+   * - Python
+     - 3.12
+     - 3.12
+
+Prerequisites
+-------------
+
+.. code-block:: bash
+
+    # Add user to qaic group to access Cloud AI devices without root
+    sudo usermod -aG qaic $USER
+    newgrp qaic
+
+For PyT mode, the ``torch_qaic`` wheels must be present under
+``/opt/qti-aic/integrations/torch_qaic/``. See
+:ref:`Apps SDK installation <apps-sdk-torch-qaic>`.
+
+Clone the plugin repository:
+
+.. code-block:: bash
+
+    git clone https://github.com/qualcomm/vllm-qaic.git
+    cd vllm-qaic
+
+Scripted install (recommended)
+------------------------------
+
+``scripts/install.sh`` installs the complete stack for the selected mode.
+Before it starts, it prints the versions and settings it will use. Activate the
+target virtual environment first.
+
+AoT mode:
+
+.. code-block:: bash
+
+    python3.12 -m venv ~/venvs/vllm-aot
+    source ~/venvs/vllm-aot/bin/activate
+    pip install -U pip
+
+    ./scripts/install.sh aot
+
+PyT mode:
+
+.. code-block:: bash
+
+    python3.12 -m venv ~/venvs/vllm-pyt
+    source ~/venvs/vllm-pyt/bin/activate
+    pip install -U pip
+
+    ./scripts/install.sh pyt
+
+Manual install - AoT mode
+-------------------------
+
+Run these commands from the ``vllm-qaic`` repository root, in an activated
+AoT virtual environment.
+
+.. code-block:: bash
+
+    # Build tools
+    pip install -r requirements/build.txt
+
+    # 1. QEfficient (model export and compilation)
+    pip install "qefficient @ git+https://github.com/qualcomm/efficient-transformers.git@release/v1.23.0"
+
+    # Re-pin CPU torch to the AoT version
+    python -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.7.0+cpu" \
+        "torchvision==0.22.0+cpu"
+
+    # 2. vLLM dependencies, then vLLM from the upstream release tag
+    pip install -r requirements/vllm_dependency_aot.txt
+    VLLM_TARGET_DEVICE=empty pip install \
+        --no-build-isolation --no-deps \
+        "vllm @ git+https://github.com/vllm-project/vllm.git@v0.23.0"
+
+    # 3. vllm-qaic plugin
+    TORCH_QAIC_INSTALLED=0 pip install --no-build-isolation .
+
+Manual install - PyT mode
+-------------------------
+
+Run these commands from the ``vllm-qaic`` repository root, in an activated
+PyT virtual environment.
+
+.. code-block:: bash
+
+    # Build tools
+    pip install -r requirements/build.txt
+
+    # 1. CPU torch first - torch_qaic requires a CPU-only torch build
+    python -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.13.0+cpu" \
+        "torchvision==0.28.0+cpu" \
+        "torchaudio==2.11.0+cpu"
+
+    # 2. torch_qaic from the Apps SDK
+    pip install /opt/qti-aic/integrations/torch_qaic/py312/torch_qaic-*.whl
+
+    # 3. vLLM dependencies, then vLLM from the upstream release tag
+    pip install -r requirements/vllm_dependency_pyt.txt
+    VLLM_TARGET_DEVICE=empty pip install \
+        --no-build-isolation --no-deps \
+        "vllm @ git+https://github.com/vllm-project/vllm.git@v0.23.0"
+
+    # 4. vllm-qaic plugin
+    pip install --no-build-isolation .
+
+Notes
+-----
+
+- Use ``python -m pip`` (not ``uv pip``) to install ``torch``. ``uv`` rejects
+  local version labels such as ``+cpu`` from remote indexes.
+- Don't install AoT and PyT mode in the same environment. The plugin selects
+  PyT mode whenever ``torch_qaic`` is installed. ``install.sh aot`` uninstalls
+  ``torch_qaic`` if it finds it.
+- Ensure no CUDA builds of PyTorch are installed in either environment.
+
+Verify the installation
+-----------------------
+
+.. code-block:: bash
+
+    python -c "import torch; print(torch.__version__)"
+    # AoT expected: 2.7.0+cpu
+    # PyT expected: 2.13.0+cpu
+
+    python -c "import vllm_qaic; print('vllm_qaic OK')"
+
+    # PyT mode only
+    python -c "import torch_qaic; print('torch_qaic OK')"

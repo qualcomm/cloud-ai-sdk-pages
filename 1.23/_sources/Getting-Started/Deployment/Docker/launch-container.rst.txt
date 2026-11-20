@@ -1,0 +1,17 @@
+
+.. _reference-to-docker-launch-container:
+
+Launch container
+================
+
+The following examples launch an x86_64 Ubuntu 24 image with a Python 3.12 environment, Apps SDK, and Platform SDK.
+
+Run the container and map one or more QAic devices. Mapping one or more local directories with the ``-v`` option is highly recommended so you have a persistent workspace and do not lose your work when the container stops.
+
+.. code:: bash
+
+   # Passing 1 device
+   docker run -dit --name qaic-ubuntu-test --device=/dev/accel/accel0 qaic-x86_64-ubuntu24-py312-release-qaic_platform-qaic_apps:1.23.2.0
+
+   # Passing 1 device and mapping a local folder
+   docker run -dit --name qaic-ubuntu-test -v /data/test:/data/test --device=/dev/accel/accel0 qaic-x86_64-ubuntu24-py312-release-qaic_platform-qaic_apps:1.23.2.0

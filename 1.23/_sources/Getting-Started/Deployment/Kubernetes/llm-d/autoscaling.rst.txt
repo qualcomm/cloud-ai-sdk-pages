@@ -1,0 +1,628 @@
+Autoscaling
+===========
+
+This page covers deploying the Workload Variant Autoscaler (WVA) for SLO-aware scaling
+of llm-d prefill and decode pods. For architecture details see :doc:`index`.
+
+WVA scales based on KV cache utilization and request queue depth — not CPU or GPU —
+and emits a ``wva_desired_replicas`` metric that a standard Kubernetes HPA reads to
+perform the actual scaling.
+
+.. note::
+
+   WVA doesn't directly scale Deployments. It acts as a metric emitter; the HPA is
+   the actuator. This means if WVA crashes, the HPA holds the last known replica count
+   rather than scaling to zero.
+
+Supported Deployment Patterns
+------------------------------
+
+Two PD disaggregation patterns are supported:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 25 25
+
+   * - Pattern
+     - Model
+     - KV Transfer
+     - Prefill Port
+   * - P-D (LMCache)
+     - meta-llama/Llama-3.1-8B-Instruct
+     - LMCache via kv-handoff-server sidecar
+     - 8000
+   * - E-PD (Encode-Prefill-Decode)
+     - Qwen/Qwen2.5-VL-32B-Instruct
+     - None — encode colocated in prefill pod
+     - 9900
+
+.. _llmd-autoscaling-prerequisites:
+
+Prerequisites
+-------------
+
+Before deploying WVA ensure:
+
+- Qualcomm AI 100 (QAIC) devices available in the cluster.
+- Client tools installed (``kubectl``, ``helm``, ``helmfile``, ``yq``, ``jq``).
+- Istio gateway installed (see :doc:`qaic-integration`).
+- **Prometheus with HTTPS/TLS enabled** — WVA connects to Prometheus over HTTPS:
+
+  .. code-block:: bash
+
+     cd llm-d/docs/monitoring
+     ./scripts/install-prometheus-grafana.sh -t -n llm-d-monitoring
+
+     # Extract CA certificate (required by WVA and Prometheus Adapter)
+     kubectl get configmap prometheus-web-tls-ca -n llm-d-monitoring \
+       -o jsonpath='{.data.ca.crt}' > /tmp/prometheus-ca.crt
+
+.. _llmd-autoscaling-deployment:
+
+Deployment
+----------
+
+.. note::
+
+   Run all commands from the **parent directory** containing both cloned repos.
+   Export these variables in every shell session before proceeding:
+
+   .. code-block:: bash
+
+      export NAMESPACE=llm-d-autoscaler
+      export RELEASE_NAME_POSTFIX=pd-qaic
+      export HF_TOKEN=<YOUR_HF_TOKEN>
+      export VERSION=0.6.0
+
+      # P-D case:
+      export MODEL="meta-llama/Llama-3.1-8B-Instruct"
+      # E-PD case:
+      # export MODEL="Qwen/Qwen2.5-VL-32B-Instruct"
+
+Step 1 — Create Namespace and Secrets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   kubectl create namespace ${NAMESPACE}
+   kubectl create secret generic llm-d-hf-token \
+     --namespace "${NAMESPACE}" \
+     --from-literal="HF_TOKEN=${HF_TOKEN}"
+
+Step 2 — Configure Values Files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**2a. Model Service Values**
+
+Choose the values file for your pattern and edit all ``# USER:`` placeholders (image, QPC
+path, cache volumes):
+
+.. code-block:: bash
+
+   # P-D case
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+   cp llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml \
+      llm-d/guides/workload-autoscaling/ms-workload-autoscaling/values_qaic.yaml
+
+   # E-PD case
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic_epd.yaml
+   cp llm-d/guides/pd-disaggregation/ms-pd/values_qaic_epd.yaml \
+      llm-d/guides/workload-autoscaling/ms-workload-autoscaling/values_qaic.yaml
+
+.. warning::
+
+   Before copying, update ``llm-d.ai/guide`` in the values file from
+   ``"pd-disaggregation"`` to ``"workload-autoscaling"``. Also add
+   ``llm-d.ai/model: ms-pd-qaic-llm-d-modelservice`` for WVA label matching.
+   Without these changes the GAIE InferencePool will not discover your pods and
+   inference requests will fail.
+
+**2b. GAIE (Inference Scheduler) Values**
+
+The ``gaie-workload-autoscaling/values_qaic.yaml`` file configures the Endpoint Picker (EPP)
+and InferencePool. It uses the ``prefix-based-pd-decider`` plugin:
+
+.. code-block:: yaml
+
+   inferencePool:
+     targetPorts:
+       - number: 8000   # decode pods (8000 for P-D, 9800 for E-PD)
+     modelServers:
+       matchLabels:
+         llm-d.ai/inference-serving: "true"
+         llm-d.ai/guide: "workload-autoscaling"
+
+**2c. WVA Decode Thresholds** (``workload-autoscaling/values_qaic_decode.yaml``)
+
+Applies to both P-D and E-PD:
+
+.. code-block:: yaml
+
+   wva:
+     namespaceScoped: true
+     controllerInstance: "decode"
+     reconcileInterval: 60s
+     prometheus:
+       baseURL: "https://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090"
+       tls:
+         insecureSkipVerify: true
+     scaleToZero: false
+     capacityScaling:
+       default:
+         kvCacheThreshold: 0.75
+         queueLengthThreshold: 5
+         kvSpareTrigger: 0.25
+         queueSpareTrigger: 2
+     va:
+       enabled: false
+     hpa:
+       enabled: false
+
+**2d. WVA Prefill Thresholds** (``workload-autoscaling/values_qaic_prefill.yaml``)
+
+Differs between P-D and E-PD:
+
+.. code-block:: yaml
+
+   wva:
+     namespaceScoped: true
+     controllerInstance: "prefill"
+     reconcileInterval: 60s
+     prometheus:
+       baseURL: "https://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090"
+       tls:
+         insecureSkipVerify: true
+     scaleToZero: false
+     capacityScaling:
+       default:
+         # Standard P-D: use 0.75
+         # E-PD: set to 1.0 — encode pods have no KV cache (see warning below)
+         kvCacheThreshold: 0.75
+         queueLengthThreshold: 3
+         # Standard P-D: use 0.25
+         # E-PD: set to 0 — spare KV is never < 0 (disabled)
+         kvSpareTrigger: 0.25
+         queueSpareTrigger: 1
+     va:
+       enabled: false
+     hpa:
+       enabled: false
+
+.. warning::
+
+   For E-PD prefill pods: set ``kvCacheThreshold: 1.0`` (not ``0``). Encode pods don't
+   accumulate KV cache. Setting ``0`` causes ``KvCacheUsage >= 0`` to be always true,
+   marking every replica as permanently saturated and blocking all scale-down.
+   Also set ``kvSpareTrigger: 0.0`` — spare KV is never negative so the KV-based
+   scale-up trigger should be disabled.
+
+Step 3 — Install the Model Service Stack
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   cd llm-d/guides/workload-autoscaling
+   helmfile apply -e qaic -n ${NAMESPACE} -l kind=inference-stack
+
+   # Wait for pods to be Running
+   kubectl get pods -n ${NAMESPACE} -l llm-d.ai/guide=workload-autoscaling -w
+
+Step 4 — Install WVA CRDs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # Remove existing CRD if present (v0.5.1 is missing maxReplicas — causes deadlocks)
+   kubectl delete crd variantautoscalings.llmd.ai --ignore-not-found
+
+   kubectl apply -f https://raw.githubusercontent.com/llm-d-incubation/workload-variant-autoscaler/v0.6.0/charts/workload-variant-autoscaler/crds/llmd.ai_variantautoscalings.yaml
+   kubectl get crd variantautoscalings.llmd.ai
+
+Step 5 — Install Two WVA Controllers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   export CA_CERT=$(cat /tmp/prometheus-ca.crt)
+
+**WVA-decode controller:**
+
+.. code-block:: bash
+
+   helm install workload-variant-autoscaler-decode \
+     oci://ghcr.io/llm-d/workload-variant-autoscaler \
+     --namespace ${NAMESPACE} \
+     --version ${VERSION} \
+     --set wva.namespaceScoped=true \
+     --set wva.controllerInstance=decode \
+     --set wva.prometheus.tls.insecureSkipVerify=true \
+     --set wva.prometheus.caCert="$(echo "${CA_CERT}")" \
+     --set va.accelerator="qualcomm" \
+     --set llmd.namespace="${NAMESPACE}" \
+     --set llmd.modelID="${MODEL}" \
+     --set llmd.modelName="ms-workload-autoscaler-llm-d-modelservice-decode" \
+     --values workload-autoscaling/values_qaic_decode.yaml
+
+**WVA-prefill controller:**
+
+.. code-block:: bash
+
+   helm install workload-variant-autoscaler-prefill \
+     oci://ghcr.io/llm-d/workload-variant-autoscaler \
+     --namespace ${NAMESPACE} \
+     --version ${VERSION} \
+     --set wva.namespaceScoped=true \
+     --set wva.controllerInstance=prefill \
+     --set wva.prometheus.tls.insecureSkipVerify=true \
+     --set wva.prometheus.caCert="$(echo "${CA_CERT}")" \
+     --set va.accelerator="qualcomm" \
+     --set llmd.namespace="${NAMESPACE}" \
+     --set llmd.modelID="${MODEL}" \
+     --set llmd.modelName="ms-workload-autoscaler-llm-d-modelservice-prefill" \
+     --values workload-autoscaling/values_qaic_prefill.yaml
+
+Step 6 — Patch ConfigMaps (Required Workaround)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. warning::
+
+   Known issue in WVA v0.6.0: the OCI chart doesn't write ``LEADER_ELECTION_ID``
+   into the ConfigMap even when ``wva.controllerInstance`` is set. Both controllers
+   default to the same lease ID, causing a lease conflict. Apply this patch immediately
+   after ``helm install``.
+
+.. code-block:: bash
+
+   # Patch decode ConfigMap
+   DECODE_CM="workload-variant-autoscaler-decode-variantautoscaling-config"
+   kubectl get configmap ${DECODE_CM} -n ${NAMESPACE} \
+     -o jsonpath='{.data.config\.yaml}' > /tmp/decode-wva-config.yaml
+   printf '\n\n# Leader Election\nLEADER_ELECTION_ID: "decode.llm-d.ai"\n' \
+     >> /tmp/decode-wva-config.yaml
+   kubectl create configmap ${DECODE_CM} -n ${NAMESPACE} \
+     --from-file=config.yaml=/tmp/decode-wva-config.yaml \
+     --dry-run=client -o yaml | kubectl apply -f -
+
+   # Patch prefill ConfigMap
+   PREFILL_CM="workload-variant-autoscaler-prefill-variantautoscaling-config"
+   kubectl get configmap ${PREFILL_CM} -n ${NAMESPACE} \
+     -o jsonpath='{.data.config\.yaml}' > /tmp/prefill-wva-config.yaml
+   printf '\n\n# Leader Election\nLEADER_ELECTION_ID: "prefill.llm-d.ai"\n' \
+     >> /tmp/prefill-wva-config.yaml
+   kubectl create configmap ${PREFILL_CM} -n ${NAMESPACE} \
+     --from-file=config.yaml=/tmp/prefill-wva-config.yaml \
+     --dry-run=client -o yaml | kubectl apply -f -
+
+   # Restart both controllers to pick up the new config
+   kubectl rollout restart \
+     deployment/workload-variant-autoscaler-decode-controller-manager \
+     deployment/workload-variant-autoscaler-prefill-controller-manager \
+     -n ${NAMESPACE}
+
+   kubectl rollout status \
+     deployment/workload-variant-autoscaler-decode-controller-manager \
+     deployment/workload-variant-autoscaler-prefill-controller-manager \
+     -n ${NAMESPACE}
+
+Verify both controllers are running and holding separate leases:
+
+.. code-block:: bash
+
+   kubectl get deployment -n ${NAMESPACE} | grep workload-variant-autoscaler
+   # Both should show READY 2/2
+
+   kubectl get lease -n ${NAMESPACE}
+   # Expected: decode.llm-d.ai and prefill.llm-d.ai, each held by their controller
+
+Step 7 — Create VariantAutoscaling and HPA Resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create a ``pd-autoscaling/`` directory inside ``llm-d/guides/workload-autoscaling/``:
+
+.. code-block:: bash
+
+   mkdir -p llm-d/guides/workload-autoscaling/pd-autoscaling
+
+Create ``pd-autoscaling/va-decode.yaml``:
+
+.. code-block:: yaml
+
+   apiVersion: llmd.ai/v1alpha1
+   kind: VariantAutoscaling
+   metadata:
+     name: wva-decode-va
+     labels:
+       inference.optimization/acceleratorName: "qualcomm"
+       llm-d.ai/model: "meta-llama/Llama-3.1-8B-Instruct"
+       llm-d.ai/inference-serving: "true"
+       llm-d.ai/guide: "workload-autoscaling"
+       llm-d.ai/role: "decode"
+       wva.llmd.ai/controller-instance: "decode"
+   spec:
+     scaleTargetRef:
+       kind: Deployment
+       name: ms-pd-qaic-llm-d-modelservice-decode
+     modelID: "meta-llama/Llama-3.1-8B-Instruct"
+     variantCost: "1.0"
+     minReplicas: 1
+     maxReplicas: 3   # Must match HPA maxReplicas
+
+Create ``pd-autoscaling/va-prefill.yaml``:
+
+.. code-block:: yaml
+
+   apiVersion: llmd.ai/v1alpha1
+   kind: VariantAutoscaling
+   metadata:
+     name: wva-prefill-va
+     labels:
+       inference.optimization/acceleratorName: "qualcomm"
+       llm-d.ai/model: "meta-llama/Llama-3.1-8B-Instruct"
+       llm-d.ai/inference-serving: "true"
+       llm-d.ai/guide: "workload-autoscaling"
+       llm-d.ai/role: "prefill"
+       wva.llmd.ai/controller-instance: "prefill"
+   spec:
+     scaleTargetRef:
+       kind: Deployment
+       name: ms-pd-qaic-llm-d-modelservice-prefill
+     modelID: "meta-llama/Llama-3.1-8B-Instruct"
+     variantCost: "1.0"
+     minReplicas: 1
+     maxReplicas: 3   # Must match HPA maxReplicas
+
+.. warning::
+
+   ``maxReplicas`` in the VariantAutoscaling must match ``maxReplicas`` in the
+   corresponding HPA. If WVA emits ``wva_desired_replicas`` greater than the HPA
+   cap, the HPA stays at max while WVA keeps emitting a higher value — causing a
+   permanent scale-down deadlock.
+
+Create ``pd-autoscaling/hpa-decode.yaml``:
+
+.. code-block:: yaml
+
+   apiVersion: autoscaling/v2
+   kind: HorizontalPodAutoscaler
+   metadata:
+     name: wva-decode-hpa
+   spec:
+     scaleTargetRef:
+       apiVersion: apps/v1
+       kind: Deployment
+       name: ms-pd-qaic-llm-d-modelservice-decode
+     minReplicas: 1
+     maxReplicas: 3
+     metrics:
+       - type: External
+         external:
+           metric:
+             name: wva_desired_replicas
+             selector:
+               matchLabels:
+                 variant_name: wva-decode-va
+           target:
+             type: AverageValue
+             averageValue: "1"
+     behavior:
+       scaleUp:
+         stabilizationWindowSeconds: 60
+         policies:
+           - type: Pods
+             value: 1
+             periodSeconds: 60
+       scaleDown:
+         stabilizationWindowSeconds: 180
+         policies:
+           - type: Pods
+             value: 1
+             periodSeconds: 60
+
+Create ``pd-autoscaling/hpa-prefill.yaml``:
+
+.. code-block:: yaml
+
+   apiVersion: autoscaling/v2
+   kind: HorizontalPodAutoscaler
+   metadata:
+     name: wva-prefill-hpa
+   spec:
+     scaleTargetRef:
+       apiVersion: apps/v1
+       kind: Deployment
+       name: ms-pd-qaic-llm-d-modelservice-prefill
+     minReplicas: 1
+     maxReplicas: 3
+     metrics:
+       - type: External
+         external:
+           metric:
+             name: wva_desired_replicas
+             selector:
+               matchLabels:
+                 variant_name: wva-prefill-va
+           target:
+             type: AverageValue
+             averageValue: "1"
+     behavior:
+       scaleUp:
+         stabilizationWindowSeconds: 60
+         policies:
+           - type: Pods
+             value: 1
+             periodSeconds: 60
+       scaleDown:
+         stabilizationWindowSeconds: 120
+         policies:
+           - type: Pods
+             value: 1
+             periodSeconds: 60
+
+Apply all manifests:
+
+.. code-block:: bash
+
+   kubectl apply -f pd-autoscaling/ -n ${NAMESPACE}
+
+Step 8 — Install Prometheus Adapter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The adapter exposes ``wva_desired_replicas`` as an external metric so HPAs can read it.
+
+.. code-block:: bash
+
+   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm repo update
+
+The adapter pod needs the Prometheus CA certificate embedded directly in its values —
+a local ``/tmp/`` path isn't accessible to the pod. Encode it first:
+
+.. code-block:: bash
+
+   CA_CERT_B64=$(base64 -w0 /tmp/prometheus-ca.crt)
+
+Save the following to ``/tmp/prometheus-adapter-values.yaml``:
+
+.. code-block:: yaml
+
+   prometheus:
+     url: https://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local
+     port: 9090
+
+   rules:
+     external:
+       - seriesQuery: 'wva_desired_replicas{variant_name!="",exported_namespace!=""}'
+         resources:
+           overrides:
+             exported_namespace: {resource: "namespace"}
+             variant_name: {resource: "deployment"}
+         name:
+           matches: "^wva_desired_replicas"
+           as: "wva_desired_replicas"
+         metricsQuery: 'wva_desired_replicas{<<.LabelMatchers>>}'
+
+   replicas: 2
+   logLevel: 4
+
+   tls:
+     enable: true
+     ca: <BASE64_ENCODED_CA>   # replace with output of: base64 -w0 /tmp/prometheus-ca.crt
+
+Install:
+
+.. code-block:: bash
+
+   # Substitute the base64 CA cert into the values file
+   sed -i "s|<BASE64_ENCODED_CA>|${CA_CERT_B64}|" /tmp/prometheus-adapter-values.yaml
+
+   helm install prometheus-adapter prometheus-community/prometheus-adapter \
+     -n llm-d-monitoring \
+     --values /tmp/prometheus-adapter-values.yaml
+
+Step 9 — Install HTTPRoute
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   cd llm-d/guides/workload-autoscaling
+   kubectl apply -f httproute.qaic.yaml -n ${NAMESPACE}
+
+.. _llmd-autoscaling-verify:
+
+Verify the Installation
+------------------------
+
+.. code-block:: bash
+
+   # All Helm releases deployed
+   helm list -n ${NAMESPACE}
+
+   # Both WVA controllers running
+   kubectl get deployment -n ${NAMESPACE} | grep workload-variant-autoscaler
+
+   # Lease isolation confirmed
+   kubectl get lease -n ${NAMESPACE}
+
+   # VariantAutoscaling and HPA resources
+   kubectl get variantautoscaling,hpa -n ${NAMESPACE}
+
+   # External metrics available to HPA
+   kubectl get --raw /apis/external.metrics.k8s.io/v1beta1 | jq '.resources[].name'
+
+Observe Autoscaling in Action
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Watch replica counts change in real time as load varies:
+
+.. code-block:: bash
+
+   # Watch HPA status — shows current / desired replicas and metric values
+   kubectl get hpa -n ${NAMESPACE} -w
+
+   # Watch WVA desired replicas metric being emitted
+   kubectl get --raw \
+     "/apis/external.metrics.k8s.io/v1beta1/namespaces/${NAMESPACE}/wva_desired_replicas" \
+     | jq '.items[] | {variant: .metricLabels.variant_name, desired: .value}'
+
+   # Check WVA controller logs to see scaling decisions
+   kubectl logs -n ${NAMESPACE} \
+     deployment/workload-variant-autoscaler-decode-controller-manager --tail=50
+
+   kubectl logs -n ${NAMESPACE} \
+     deployment/workload-variant-autoscaler-prefill-controller-manager --tail=50
+
+   # Verify Prometheus Adapter is surfacing the metric
+   kubectl get --raw /apis/external.metrics.k8s.io/v1beta1 \
+     | jq '.resources[].name' | grep wva
+
+.. _llmd-autoscaling-troubleshooting:
+
+Troubleshooting
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 30 35
+
+   * - Symptom
+     - Likely Cause
+     - Fix
+   * - Both WVA controllers hold the same lease
+     - ``LEADER_ELECTION_ID`` not set (v0.6.0 chart bug)
+     - Apply the ConfigMap patch in Step 6.
+   * - WVA never scales up (``shouldScaleUp`` always false)
+     - ``kvSpareTrigger`` and ``queueSpareTrigger`` not set in values
+     - Add both fields to the ``capacityScaling.default`` block.
+   * - Scale-down permanently blocked for E-PD prefill
+     - ``kvCacheThreshold: 0`` — marks every replica as always saturated
+     - Set ``kvCacheThreshold: 1.0`` for E-PD prefill pods.
+   * - HPA stuck at ``maxReplicas``
+     - ``maxReplicas`` in VariantAutoscaling != HPA ``maxReplicas``
+     - Set matching values in both the VA and HPA manifests.
+   * - InferencePool has zero endpoints
+     - ``llm-d.ai/guide`` label mismatch between modelservice values and GAIE
+     - Ensure ``llm-d.ai/guide: workload-autoscaling`` in both the modelservice values and GAIE ``matchLabels``.
+   * - WVA logs show Prometheus connection errors
+     - TLS or URL misconfigured; CA cert not trusted
+     - Verify ``prometheus.baseURL`` matches the in-cluster service name. Check ``kubectl logs`` of the WVA controller for the exact TLS error. Re-extract the CA cert with ``kubectl get configmap prometheus-web-tls-ca -n llm-d-monitoring -o jsonpath='{.data.ca\.crt}'``.
+   * - ``wva_desired_replicas`` metric not found in external metrics API
+     - Prometheus Adapter not running or rules not matching
+     - ``kubectl get pods -n llm-d-monitoring | grep adapter`` — if not running, check ``helm list -n llm-d-monitoring``. If running, check adapter logs: ``kubectl logs -n llm-d-monitoring deployment/prometheus-adapter``.
+
+.. _llmd-autoscaling-cleanup:
+
+Cleanup
+-------
+
+.. code-block:: bash
+
+   cd llm-d/guides/workload-autoscaling
+   helmfile destroy -e qaic -n ${NAMESPACE}
+
+   helm uninstall workload-variant-autoscaler-decode -n ${NAMESPACE}
+   helm uninstall workload-variant-autoscaler-prefill -n ${NAMESPACE}
+   helm uninstall prometheus-adapter -n llm-d-monitoring
+
+   kubectl delete -f pd-autoscaling/ -n ${NAMESPACE} --ignore-not-found
+   kubectl delete -f httproute.qaic.yaml -n ${NAMESPACE} --ignore-not-found
+   kubectl delete ns ${NAMESPACE}

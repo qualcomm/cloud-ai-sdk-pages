@@ -1,0 +1,331 @@
+Feature overview
+================
+
+Metrics Retrieval
+^^^^^^^^^^^^^^^^^
+
+AICM continuously polls connected AIC100 devices and caches the latest data.
+Four categories of metrics are available:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 50 30
+
+   * - Category
+     - Description
+     - REST path prefix
+   * - Health data
+     - General device state, temperatures, power, NSP, DDR, resources.
+     - ``/aicm/health_data/``
+   * - PCIe data
+     - PCIe bytes received / transmitted per device.
+     - ``/aicm/health_data/pci_data``
+   * - DDR bandwidth
+     - DDR byte counts per NSP.
+     - ``/aicm/health_data/ddr_bw_data``
+   * - RAS errors
+     - Correctable and uncorrectable error counts across DDR, MCW, IMEM, NSP.
+     - ``/aicm/health_data/ras_errors``
+
+Each category has three variants:
+
+* All devices: ``GET /aicm/health_data/``
+* Single device: ``GET /aicm/health_data/device-{dev_id}``
+* Group: ``GET /aicm/health_data/group-{group_id}``
+
+The same pattern applies to ``pci_data``, ``ddr_bw_data``, and ``ras_errors``.
+
+List Connected Devices
+~~~~~~~~~~~~~~~~~~~~~~
+
+To see which device IDs are recognised by AICM:
+
+.. code-block:: bash
+
+   GET /aicm/device_list
+   # Response: {"total_devices": 2, "device_ids": [0, 1]}
+
+Collection Intervals
+~~~~~~~~~~~~~~~~~~~~
+
+Polling intervals are configurable per metric category.  The ``--collection``
+flag or the ``collection`` config key accepts ``KEY=VALUE`` pairs in
+milliseconds:
+
+.. code-block:: bash
+
+   python aicm_agent.py --collection HEALTH=500 PCI=2000 DDR_BW=1000 RAS_ECC_ERROR=10000
+
+Minimum intervals enforced by AICM:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Collection
+     - Default (ms)
+     - Minimum (ms)
+   * - ``HEALTH``
+     - 1 000
+     - 500
+   * - ``PCI``
+     - 1 000
+     - 1 000
+   * - ``DDR_BW``
+     - 1 000
+     - 1 000
+   * - ``RAS_ECC_ERROR``
+     - 10 000
+     - 5 000
+
+Prometheus Export
+~~~~~~~~~~~~~~~~~
+
+AICM can serve metrics in Prometheus text format:
+
+* Health + PCIe: ``GET /aicm/health_data/prometheus_health_metrics``
+* RAS errors: ``GET /aicm/health_data/prometheus_ras_metrics``
+
+See :doc:`examples-how-to-guides` for Prometheus scrape configuration.
+
+.. raw:: html
+
+   <span id="groups-and-device-configuration"></span>
+
+Device Groups
+^^^^^^^^^^^^^
+
+.. image:: resources/Grouping.png
+   :alt: AICM device grouping
+
+Groups are logical collections of device IDs that can be targeted as a unit in
+metric queries, policies, and diagnostic checks.
+
+Key properties:
+
+* Group IDs are user-defined strings.  They **must not start with a digit**
+  (to distinguish them from numeric device IDs).
+* Groups are host-local — they cannot span multiple hosts.
+* There is no validation against physical devices.  Devices that are not
+  reachable return ``device_reachable=false`` in the response; reachable
+  devices return ``device_reachable=true``.
+
+Group management API (``/aicm/group_manager/``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Operation
+     - Endpoint
+   * - Create group
+     - ``POST /aicm/group_manager/group?group_id=<id>``
+   * - Delete group
+     - ``DELETE /aicm/group_manager/group?group_id=<id>``
+   * - List all groups
+     - ``GET /aicm/group_manager/groups``
+   * - List devices in group
+     - ``GET /aicm/group_manager/group/devices?group_id=<id>``
+   * - Add device(s) to group
+     - ``POST /aicm/group_manager/group/device[s]``
+   * - Remove device(s) from group
+     - ``DELETE /aicm/group_manager/group/device[s]``
+   * - Remove all devices from group
+     - ``DELETE /aicm/group_manager/group/empty?group_id=<id>``
+
+Policies and Alerts
+^^^^^^^^^^^^^^^^^^^
+
+Policies monitor a metric over a rolling time window and fire an alert when a
+threshold condition is met.
+
+Supported Conditions
+~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Condition ID
+     - Monitored metric
+     - Data model
+   * - ``temperature_violation``
+     - ``soc_temparature_degree_C``
+     - Health
+   * - ``power_violation``
+     - ``board_power_watts``
+     - Health
+   * - ``DDR_pages_retirement_violation``
+     - ``num_retired_ddr_pages``
+     - Health
+
+Supported Actions
+~~~~~~~~~~~~~~~~~
+
++----------+----------------------------------------------------------+
+| Action   | Behaviour                                                |
++==========+==========================================================+
+| ``alert``| Pushes a JSON event to all subscribed SSE clients.       |
++----------+----------------------------------------------------------+
+
+Policy Evaluation Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
+
+   * - Parameter
+     - Description
+     - Valid values
+   * - ``duration``
+     - Rolling time window (seconds) over which samples are aggregated.
+     - ``10``, ``30``, ``60``, ``300``, ``600``
+   * - ``aggregation_type``
+     - Function applied to samples in the window.
+     - ``min``, ``max``, ``avg``
+   * - ``comparison_operator``
+     - How the aggregated value is compared to the threshold.
+     - ``greater``, ``greater_or_equal``, ``less``, ``less_or_equal``
+   * - ``threshold``
+     - Numeric threshold value.
+     - Any float
+
+Creating a Policy via REST
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   POST /aicm/policy/
+   Content-Type: application/json
+
+   {
+     "id": "temp_alert_dev0",
+     "condition_id": "temperature_violation",
+     "action_id": "alert",
+     "items": [0],
+     "evaluation_parameters": {
+       "duration": 60,
+       "aggregation_type": "avg",
+       "comparison_operator": "greater",
+       "threshold": 85.0
+     }
+   }
+
+``items`` may contain device IDs (integers) and group IDs (strings) in the
+same list.
+
+Policy API operations:
+
+* ``GET /aicm/policy/`` — list all policies
+* ``POST /aicm/policy/`` — create a policy
+* ``PUT /aicm/policy/`` — update a policy
+* ``DELETE /aicm/policy/?policy_id=<id>`` — delete a policy
+
+.. raw:: html
+
+   <span id="alerts"></span>
+
+Subscribing to Policy Alerts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Subscribe to the SSE stream to receive alerts in real time:
+
+.. code-block:: bash
+
+   GET /aicm/sse/policy-alerts
+   Accept: text/event-stream
+
+Each event is a JSON object:
+
+.. code-block:: json
+
+   {
+     "type": "POLICY",
+     "policy_id": "temp_alert_dev0",
+     "device_id": 0,
+     "value": 87.3,
+     "alert_time": "2025-06-01T10:32:00.123456"
+   }
+
+A complete Python example is provided in
+``examples/policy_alert_subscribe_example.py``.
+
+.. raw:: html
+
+   <span id="checks-and-diagnostic-report-alerts"></span>
+
+Diagnostics Checks
+^^^^^^^^^^^^^^^^^^
+
+AICM can run on-demand diagnostic suites on individual devices or groups using
+the ``qaic-fdt`` Field Diagnostics Tool.
+
+For a full step-by-step walkthrough — prerequisites, starting a test, and
+reading pass/fail — see :doc:`diagnostics-how-to`.
+
+Check Categories
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Category
+     - Tests included
+   * - ``quick``
+     - Default software checks, PCI checks, device checks, quick inference test.
+   * - ``medium``
+     - All quick checks, plus ECC checks and medium inference test.
+   * - ``long``
+     - All medium checks, plus long inference test.
+
+Creating a Check
+~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   POST /aicm/checks
+   Content-Type: application/json
+
+   {
+     "id": "check_dev0",
+     "category": "quick",
+     "items": [0]
+   }
+
+``items`` may contain device IDs (integers) and group IDs (strings).
+
+Retrieving Pending Checks
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   GET /aicm/checks
+
+.. raw:: html
+
+   <span id="diagnostic-report-alerts"></span>
+
+Subscribing to Diagnostic Report Alerts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Results are delivered as SSE events on:
+
+.. code-block:: bash
+
+   GET /aicm/sse/diagnostics-report
+   Accept: text/event-stream
+
+A complete Python example is provided in
+``examples/diag_report_subscribe_example.py``.
+
+.. note::
+
+   Special error cases in diagnostic report alerts:
+
+   1. If a card has a problem, the alert reports ``User permission error``.
+      Run AICM as root for complete device access.
+   2. If the alert reports
+      ``Command not found: /opt/qti-aic/tools/qaic-version-util``,
+      grant execute permission: ``chmod 755 /opt/qti-aic/tools/qaic-version-util``.

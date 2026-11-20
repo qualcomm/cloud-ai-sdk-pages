@@ -1,0 +1,643 @@
+Deployment Variants
+===================
+
+Three QAIC configurations are available. Choose based on your model and KV transfer
+requirements. For architecture diagrams of each variant, see :doc:`index`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 28 22 22
+
+   * - Variant
+     - Model
+     - Values File
+     - KV Transfer
+   * - Standard PD — QAIC native connector
+     - meta-llama/Llama-3.1-8B-Instruct
+     - ``ms-pd/values_qaic.yaml``
+     - Shared memory (``/dev/shm``) — single host only; prefill and decode must be on the same node
+   * - PD — LMCache connector
+     - meta-llama/Llama-3.1-8B-Instruct
+     - ``ms-pd/values_qaic_lmcache.yaml``
+     - Network via ``kv-handoff-server`` sidecar — supports single and multi-host; requires fp16 QPC
+   * - E-PD — Encode-Prefill-Decode (VLM)
+     - Qwen/Qwen2.5-VL-32B-Instruct
+     - ``ms-pd/values_qaic_epd.yaml``
+     - None (encode colocated in prefill pod)
+
+.. note::
+
+   The LMCache variant requires QPCs compiled with fp16 precision (not mxfp6). The
+   ``kv_connector`` field must be set to ``"QaicLMCacheConnectorV1"``.
+
+   Set ``multinode: false`` in the values file for single-host deployments.
+   Set ``multinode: true`` only when prefill and decode pods run on different nodes.
+
+.. _llmd-disagg-deployment:
+
+Deployment
+----------
+
+.. note::
+
+   Run all commands from the **parent directory** containing both cloned repos:
+
+   .. code-block:: text
+
+      <parent>/
+      ├── llm-d/
+      └── llm-d-modelservice/
+
+Step 1 — Set Environment Variables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Export these in every shell session before running any helmfile or kubectl commands:
+
+.. code-block:: bash
+
+   export NAMESPACE=llm-d-pd-qaic
+   export RELEASE_NAME_POSTFIX=pd-qaic
+   export HF_TOKEN=<YOUR_HF_TOKEN>
+
+Step 2 — Create Namespace and Secrets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   kubectl create namespace ${NAMESPACE}
+   kubectl create secret generic llm-d-hf-token \
+     --namespace "${NAMESPACE}" \
+     --from-literal="HF_TOKEN=${HF_TOKEN}"
+
+.. warning::
+
+   ``RELEASE_NAME_POSTFIX`` must be exported in the **same shell** that runs
+   ``helmfile apply``. Without it, releases default to ``infra-pd`` / ``gaie-pd`` /
+   ``ms-pd`` (without the ``-qaic`` suffix), and subsequent ``kubectl get`` commands
+   targeting ``*-pd-qaic-*`` resources will return nothing.
+
+Step 3 — Configure the Values File
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Choose the values file for your variant and edit all ``# USER:`` placeholders:
+
+**Standard PD (default):**
+
+.. code-block:: bash
+
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+
+**LMCache variant:**
+
+.. code-block:: bash
+
+   cp llm-d/guides/pd-disaggregation/ms-pd/values_qaic_lmcache.yaml \
+      llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+
+**E-PD variant:**
+
+.. code-block:: bash
+
+   cp llm-d/guides/pd-disaggregation/ms-pd/values_qaic_epd.yaml \
+      llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+
+Fields to update in every variant:
+
+- ``containers[].image`` — QAIC vLLM image (see :doc:`/Getting-Started/Model-Serving/vLLM-Serving/index` for
+  available image tags, e.g. ``ghcr.io/qualcomm/cloud_ai_inference_vllm:1.23.2.0``)
+- ``VLLM_QAIC_QPC_PATH`` — node-local path to the compiled QPC (separate paths for
+  decoder and encoder in E-PD)
+- ``hostPath`` volumes — node-local cache directory (e.g. ``/local/mnt/workspace/.cache/``)
+
+Step 4 — Deploy the Stack
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   cd llm-d/guides/pd-disaggregation
+   helmfile apply -e qaic -n ${NAMESPACE}
+
+Wait for all pods to reach ``Running``:
+
+.. code-block:: bash
+
+   kubectl get pods -n ${NAMESPACE} -w
+
+Step 5 — Install HTTPRoute
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # Still inside llm-d/guides/pd-disaggregation/ from Step 4
+   kubectl apply -f httproute.qaic.yaml -n ${NAMESPACE}
+
+.. _llmd-disagg-verify:
+
+Verify the Installation
+------------------------
+
+.. code-block:: bash
+
+   # All Helm releases should show status "deployed"
+   helm list -n ${NAMESPACE}
+
+   # All resources
+   kubectl get all -n ${NAMESPACE}
+
+   # HTTPRoute
+   kubectl get httproute -n ${NAMESPACE}
+
+   # Decode pod — should show 2/2 READY (vllm + routing-sidecar)
+   kubectl get pods -n ${NAMESPACE} -l llm-d.ai/role=decode
+
+   # Prefill pod — should show 1/1 READY
+   kubectl get pods -n ${NAMESPACE} -l llm-d.ai/role=prefill
+
+Expected pods:
+
+.. code-block:: text
+
+   NAME                                                    READY   STATUS
+   ms-pd-qaic-llm-d-modelservice-decode-xxx                2/2     Running
+   ms-pd-qaic-llm-d-modelservice-prefill-xxx               1/1     Running
+   ms-pd-qaic-llm-d-modelservice-kv-handoff-server-xxx     1/1     Running   # LMCache only
+   gaie-pd-qaic-epp-xxx                                    1/1     Running
+   infra-pd-qaic-inference-gateway-istio-xxx               1/1     Running
+
+Testing
+-------
+
+Port-forward the gateway and send a request:
+
+.. code-block:: bash
+
+   GATEWAY_SVC=$(kubectl get service -n "${NAMESPACE}" | grep gateway | awk '{print $1}')
+   kubectl port-forward -n ${NAMESPACE} service/${GATEWAY_SVC} 8086:80 &
+   PF_PID=$!
+
+   # Standard PD / LMCache (Llama-3.1-8B-Instruct)
+   curl -X POST "http://localhost:8086/v1/chat/completions" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "meta-llama/Llama-3.1-8B-Instruct",
+       "messages": [{"role": "user", "content": "Explain PD disaggregation in LLM inference"}],
+       "max_tokens": 150
+     }'
+
+   # E-PD (Qwen2.5-VL-32B-Instruct)
+   curl -X POST "http://localhost:8086/v1/chat/completions" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "Qwen/Qwen2.5-VL-32B-Instruct",
+       "messages": [{"role": "user", "content": "Describe this image"}],
+       "max_tokens": 150
+     }'
+
+   # Stop port-forward when done
+   kill $PF_PID
+
+Verify GAIE is routing traffic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Check that the InferencePool has discovered your pods and is actively routing:
+
+.. code-block:: bash
+
+   kubectl describe inferencepool -n ${NAMESPACE}
+
+   # Check EPP logs for routing decisions
+   kubectl logs -n ${NAMESPACE} -l app.kubernetes.io/component=epp --tail=50
+
+Configuration Reference
+-----------------------
+
+Model Service Values Structure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Key sections of ``ms-pd/values_qaic.yaml``:
+
+.. code-block:: yaml
+
+   accelerator:
+     type: qualcomm
+
+   modelArtifacts:
+     uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
+     name: "meta-llama/Llama-3.1-8B-Instruct"
+     labels:
+       llm-d.ai/inference-serving: "true"
+       llm-d.ai/guide: "pd-disaggregation"  # used by GAIE InferencePool
+
+   routing:
+     servicePort: 8000
+     proxy:
+       connector: nixlv2     # KV transfer connector
+       targetPort: 9800      # port the decode vLLM listens on
+
+   decode:
+     create: true
+     replicas: 1
+     containers:
+       - name: "vllm"
+         image: <YOUR_QAIC_VLLM_IMAGE>   # USER: replace
+         resources:
+           limits:
+             qualcomm.com/qaic: 2
+
+   prefill:
+     create: true
+     replicas: 1
+     containers:
+       - name: "vllm"
+         image: <YOUR_QAIC_VLLM_IMAGE>   # USER: replace
+         resources:
+           limits:
+             qualcomm.com/qaic: 2
+
+GAIE InferencePool Label Matching
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The GAIE InferencePool discovers pods using these labels:
+
+.. code-block:: yaml
+
+   inferencePool:
+     modelServers:
+       matchLabels:
+         llm-d.ai/inference-serving: "true"
+         llm-d.ai/guide: "pd-disaggregation"
+
+.. warning::
+
+   If you copy these values files for use in the :doc:`autoscaling` guide, you must
+   change ``llm-d.ai/guide`` from ``"pd-disaggregation"`` to ``"workload-autoscaling"``
+   — otherwise the GAIE InferencePool in that guide will not discover your pods.
+
+Container Probes
+~~~~~~~~~~~~~~~~~
+
+Recommended probe configuration for vLLM containers:
+
+.. code-block:: yaml
+
+   containers:
+     - name: vllm
+       ports:
+         - containerPort: 8000
+           protocol: TCP
+
+       startupProbe:
+         httpGet:
+           path: /v1/models
+           port: 8000
+         initialDelaySeconds: 15
+         periodSeconds: 30
+         timeoutSeconds: 5
+         failureThreshold: 60   # 30s * 60 = 30 min max startup time
+
+       livenessProbe:
+         httpGet:
+           path: /health
+           port: 8000
+         periodSeconds: 10
+         timeoutSeconds: 5
+         failureThreshold: 3
+
+       readinessProbe:
+         httpGet:
+           path: /v1/models
+           port: 8000
+         periodSeconds: 5
+         timeoutSeconds: 2
+         failureThreshold: 3
+
+.. note::
+
+   ``/health`` returns ``200 OK`` immediately when the vLLM process starts — it doesn't
+   wait for model loading. Use it only for ``livenessProbe``. Use ``/v1/models`` for
+   ``startupProbe`` and ``readinessProbe`` — it returns ``503`` during model loading and
+   ``200 OK`` once the model is ready.
+
+Notes
+-----
+
+- ``/dev/shm`` **size for standard PD connector**: KV cache is transferred via shared
+  memory. The default Kubernetes ``/dev/shm`` is 64 MB — far too small for large models
+  and will cause silent transfer failures. Add an ``emptyDir: Memory`` volume to both
+  prefill and decode pods in your values file:
+
+  .. code-block:: yaml
+
+     volumes:
+       - name: shm
+         emptyDir:
+           medium: Memory
+           sizeLimit: 8Gi
+     volumeMounts:
+       - name: shm
+         mountPath: /dev/shm
+
+- **Pre-pull images on every QAIC-equipped node** before deploying to avoid per-pod
+  ``ImagePullBackOff`` during rollout:
+
+  .. code-block:: bash
+
+     sudo crictl pull <YOUR_QAIC_VLLM_IMAGE>
+
+- **Pre-compile QPCs** and place them at the node-local path referenced by
+  ``VLLM_QAIC_QPC_PATH``. If the QPC takes longer than about 5 minutes to load,
+  increase ``startupProbe.failureThreshold`` accordingly (for example from 10 to 30).
+
+- **Device count alignment**: ``resources.limits.qualcomm.com/qaic`` must match the number
+  of QAIC devices the QPC was compiled for. A mismatch causes the pod to receive devices it
+  can't access.
+
+- **Proxy log verbosity**: ``routing.proxy.zapLogLevel`` defaults to ``4`` (very verbose).
+  Lower it to ``1`` in production.
+
+- **imagePullSecrets**: If the QAIC vLLM image is in a private registry, create a pull
+  secret in the namespace and reference it in your values file:
+
+  .. code-block:: bash
+
+     kubectl create secret docker-registry regcred \
+       --docker-server=<REGISTRY> \
+       --docker-username=<USER> \
+       --docker-password=<TOKEN> \
+       -n ${NAMESPACE}
+
+  Then add to your values under ``decode`` and ``prefill``:
+
+  .. code-block:: yaml
+
+     imagePullSecrets:
+       - name: regcred
+
+- Set ``imagePullPolicy: IfNotPresent`` in container specs once images are pre-pulled
+  on nodes. This avoids redundant registry pulls and speeds up pod startup.
+
+- **Add CPU and memory requests** alongside ``qualcomm.com/qaic`` limits. Without them
+  the Kubernetes scheduler can't bin-pack pods correctly and the vLLM process may be
+  OOM-killed on memory-constrained nodes:
+
+  .. code-block:: yaml
+
+     resources:
+       requests:
+         cpu: "4"
+         memory: "16Gi"
+       limits:
+         cpu: "8"
+         memory: "32Gi"
+         qualcomm.com/qaic: 2
+
+- **Check vLLM pod logs** if inference is slow or fails:
+
+  .. code-block:: bash
+
+     kubectl logs -n ${NAMESPACE} -l llm-d.ai/role=decode --tail=100
+     kubectl logs -n ${NAMESPACE} -l llm-d.ai/role=prefill --tail=100
+
+.. _llmd-disagg-troubleshooting:
+
+Troubleshooting
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 30 35
+
+   * - Symptom
+     - Likely Cause
+     - Fix
+   * - ``helmfile apply -e qaic`` → chart not found
+     - ``llm-d-modelservice`` is not a sibling of ``llm-d``
+     - Both repos must sit in the same parent directory. The helmfile is three levels deep (``llm-d/guides/pd-disaggregation/``) and climbs up to ``<parent>/`` to find ``llm-d-modelservice/``. Re-clone it alongside ``llm-d`` if needed.
+   * - Releases named ``infra-pd``, ``gaie-pd``, ``ms-pd`` (no ``-qaic`` suffix)
+     - ``RELEASE_NAME_POSTFIX`` not exported in current shell
+     - ``export RELEASE_NAME_POSTFIX=pd-qaic`` and re-run; destroy old releases first.
+   * - Decode pod stuck ``0/2`` then ``CrashLoopBackOff``
+     - QPC absent at ``VLLM_QAIC_QPC_PATH`` or startup probe timed out during compilation
+     - Pre-stage the QPC on the node. Raise ``startupProbe.failureThreshold`` from 10 to 30.
+   * - EPP / GAIE InferencePool has zero endpoints
+     - Pod labels don't match ``matchLabels`` in ``gaie-pd/values_qaic.yaml``
+     - ``kubectl get pods -n ${NAMESPACE} --show-labels`` and verify ``llm-d.ai/inference-serving=true`` and ``llm-d.ai/guide=pd-disaggregation``.
+   * - ``helmfile destroy -e qaic`` leaves namespace stuck ``Terminating``
+     - Finalizers on InferencePool or HTTPRoute
+     - Delete HTTPRoute and InferencePool resources first, then force-finalize the namespace.
+
+Multi-Node Deployment (LMCache Connector)
+------------------------------------------
+
+The LMCache connector variant supports prefill and decode pods running on **different
+physical nodes**, connected over RoCE/InfiniBand. This is the recommended configuration
+for production clusters where a single node can't hold the full KV cache traffic for
+both stages.
+
+Requirements
+~~~~~~~~~~~~~
+
+- Shared storage: QPCs must be accessible from all nodes via an NFS-backed
+  PersistentVolumeClaim (``ReadWriteMany``). Node-local ``hostPath`` volumes won't
+  work across nodes.
+- fp16 QPCs (not mxfp6) — required by the LMCache connector.
+- LeaderWorkerSet controller installed (see :doc:`qaic-integration`).
+- Set ``multinode: true`` in ``ms-pd/values_qaic_lmcache.yaml``.
+
+Values File
+~~~~~~~~~~~
+
+Start from the LMCache values file generated by ``llmd_config_gen.py`` and enable
+multi-node:
+
+.. code-block:: bash
+
+   cp llm-d/guides/pd-disaggregation/ms-pd/values_qaic_lmcache.yaml \
+      llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+   vi llm-d/guides/pd-disaggregation/ms-pd/values_qaic.yaml
+
+Key fields to update for multi-node:
+
+.. code-block:: yaml
+
+   multinode: true
+
+   modelArtifacts:
+     uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
+
+   decode:
+     containers:
+       - name: "vllm"
+         image: <YOUR_QAIC_VLLM_IMAGE>
+         env:
+           - name: VLLM_QAIC_QPC_PATH
+             value: <NFS_MOUNT_PATH>/decoder.qpc   # path via PVC
+         resources:
+           limits:
+             qualcomm.com/qaic: 4
+
+   prefill:
+     containers:
+       - name: "vllm"
+         image: <YOUR_QAIC_VLLM_IMAGE>
+         env:
+           - name: VLLM_QAIC_QPC_PATH
+             value: <NFS_MOUNT_PATH>/prefill.qpc   # path via PVC
+         resources:
+           limits:
+             qualcomm.com/qaic: 4
+
+Deploy
+~~~~~~
+
+The deployment steps are the same as the single-host LMCache variant:
+
+.. code-block:: bash
+
+   export NAMESPACE=llm-d-pd-qaic
+   export RELEASE_NAME_POSTFIX=pd-qaic
+
+   cd llm-d/guides/pd-disaggregation
+   helmfile apply -e qaic -n ${NAMESPACE}
+   kubectl apply -f httproute.qaic.yaml -n ${NAMESPACE}
+
+Verify that prefill and decode pods are scheduled on **different nodes**:
+
+.. code-block:: bash
+
+   kubectl get pods -n ${NAMESPACE} -o wide -l llm-d.ai/role=prefill
+   kubectl get pods -n ${NAMESPACE} -o wide -l llm-d.ai/role=decode
+
+.. note::
+
+   To **enforce** prefill and decode on different nodes, add ``podAntiAffinity`` to your
+   values file under both ``prefill`` and ``decode``. Without this, the scheduler may
+   colocate them on the same node which defeats the purpose of multi-node disaggregation:
+
+   .. code-block:: yaml
+
+      decode:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    llm-d.ai/role: prefill
+                topologyKey: kubernetes.io/hostname
+
+      prefill:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    llm-d.ai/role: decode
+                topologyKey: kubernetes.io/hostname
+
+.. _llmd-disagg-cleanup:
+
+Cleanup
+-------
+
+.. code-block:: bash
+
+   cd llm-d/guides/pd-disaggregation
+   helmfile destroy -e qaic -n ${NAMESPACE}
+   kubectl delete -f httproute.qaic.yaml -n ${NAMESPACE}
+   kubectl delete ns ${NAMESPACE}
+
+Building the qaic_disagg Docker Image
+--------------------------------------
+
+If a prebuilt ``qaic_disagg`` image isn't available, build it from the vLLM repository.
+This image is required for the QAIC proxy and KV-handoff server containers.
+
+Create the Dockerfile at ``vllm/qaic_disagg/docker/Dockerfile.qaic_disagg``:
+
+.. code-block:: dockerfile
+
+   ARG BASE_IMAGE=ghcr.io/qualcomm/cloud_ai_inference_ubuntu22:1.23.2.0
+
+   FROM ${BASE_IMAGE}
+   WORKDIR /app
+
+   COPY ../../qaic_disagg /qaic_disagg
+
+   RUN /bin/bash -c "set -e && \
+     source /opt/vllm-env/bin/activate && \
+     cd /qaic_disagg && \
+     pip install -e . && \
+     echo 'qaic_disagg installed successfully'"
+
+   ENV VLLM_ENGINE_ITERATION_TIMEOUT_S=6000 \
+       OMP_NUM_THREADS=8 \
+       VLLM_QAIC_MAX_CPU_THREADS=8
+
+   RUN mkdir -p /app/logs
+   CMD ["/bin/bash"]
+
+Build and push from the ``vllm/`` directory:
+
+.. code-block:: bash
+
+   cd vllm
+   docker build \
+     -f qaic_disagg/docker/Dockerfile.qaic_disagg \
+     -t qaic_disagg:latest .
+
+   # Tag and push to your registry
+   docker tag qaic_disagg:latest <YOUR_REGISTRY>/qaic_disagg:latest
+   docker push <YOUR_REGISTRY>/qaic_disagg:latest
+
+Validate the image with a sample disaggregated server command:
+
+.. code-block:: bash
+
+   python3 -m qaic_disagg \
+     --port 8081 \
+     --model meta-llama/Llama-3.1-8B-Instruct \
+     --prefill-port 9900 \
+     --decode-port 9800 \
+     --prefill-device-group 0,1 \
+     --decode-device-group 2,3 \
+     --prefill-max-num-seqs 2 \
+     --decode-max-num-seqs 2 \
+     --max-model-len 256 \
+     --max-seq-len-to-capture 128
+
+Or using Docker Compose (``vllm/qaic_disagg/docker/docker-compose.yaml``):
+
+.. code-block:: yaml
+
+   services:
+     qaic-disagg:
+       image: <YOUR_REGISTRY>/qaic_disagg:latest
+       command: >
+         /bin/bash -c "source /opt/vllm-env/bin/activate && python3 -m qaic_disagg
+         --port 8081 --model meta-llama/Llama-3.1-8B-Instruct
+         --prefill-port 9900 --decode-port 9800
+         --prefill-device-group 0,1 --decode-device-group 2,3
+         --prefill-max-num-seqs 2 --decode-max-num-seqs 2
+         --max-model-len 256 --max-seq-len-to-capture 128"
+       ports:
+         - "8081:8081"
+         - "9900:9900"
+         - "9800:9800"
+       environment:
+         - QEFF_HOME=/root/.cache/qeff_models
+         - HF_HOME=/root/.cache
+         - HF_TOKEN=${HF_TOKEN}
+       volumes:
+         - /local/mnt/workspace/.cache:/root/.cache
+         - /dev/shm:/dev/shm
+       devices:
+         - /dev/accel/accel0:/dev/accel/accel0
+         - /dev/accel/accel1:/dev/accel/accel1
+         - /dev/accel/accel2:/dev/accel/accel2
+         - /dev/accel/accel3:/dev/accel/accel3
+
+.. code-block:: bash
+
+   cd vllm/qaic_disagg/docker && docker compose up

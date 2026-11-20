@@ -1,0 +1,388 @@
+.. -----------------------------------------------------------------------------
+..
+.. Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. All rights reserved.
+.. Confidential and Proprietary - Qualcomm Technologies, Inc. and/or its subsidiaries.
+..
+.. -----------------------------------------------------------------------------
+
+Running Diagnostic Tests on a Card
+==================================
+
+This how-to guide walks through starting a diagnostic test on an AIC100 card with AIC
+Manager (AICM) and the ``qaic-fdt`` Field Diagnostics Tool, and reading whether
+the card passed or failed.
+
+It supports the validation-and-health-check workflow. The user can run these checks on a card before bringing it into
+service.
+
+.. contents:: Table of Contents
+   :local:
+   :depth: 2
+
+Overview
+--------
+
+A **diagnostic check** is an on-demand test suite that AICM runs against one or
+more devices by invoking the ``qaic-fdt`` binary. You request a check over the
+REST API; AICM runs it in the background and streams the report back over a
+Server-Sent Events (SSE) stream.
+
+End-to-end flow:
+
+.. code-block:: text
+
+   POST /aicm/checks                     (you request a check)
+       │
+       ▼
+   ChecksManager background loop         (evaluates every 15 s, once per check)
+       │
+       ▼  resolve items to device QIDs
+   qaic-fdt --json --pci <bdf1>,<bdf2>,… --runbook <category>.toml
+       │                                 (one run covering all devices)
+       ▼
+   DiagReportAlert  ──►  GET /aicm/sse/diagnostics-report   (you read the result)
+
+Diagnostics are **API-only**. Unlike most other AICM features, there is no
+``aicmi`` interactive-CLI path for checks: you drive them with HTTP requests
+(``curl``, a Python client, or any HTTP tool). For AICM install, start, and
+authentication, see the :doc:`user-guide`.
+
+Prerequisites
+-------------
+
+Before you can start a diagnostic test, make sure the following are in place:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Requirement
+     - Detail
+   * - AICM running
+     - AICM must be installed and started, and reachable at ``<IP>:<PORT>``.
+       See :doc:`user-guide` for install, start, and authentication.
+   * - QMonitor running
+     - The ``qmonitor`` daemon must be running on the host; AICM talks to it to
+       enumerate devices.
+   * - ``qaic-fdt`` installed
+     - The Field Diagnostics Tool must be present and executable at
+       ``/opt/qti-aic/tools/qaic-fdt``. AICM shells out to this exact path.
+   * - Root / sudo
+     - Run AICM as **root** for complete device access. Without it, checks can
+       report a ``User permission error`` (see `Troubleshooting`_).
+   * - Basic Auth credentials
+     - Every AICM route requires HTTP Basic Auth. Have a valid username and
+       password from ``.users.yaml`` ready.
+   * - Target device IDs (QIDs)
+     - Know which devices to test. List connected devices with
+       ``GET /aicm/device_list`` (see `Starting a Diagnostic Test`_, Step 2).
+
+Diagnostic Test Categories
+--------------------------
+
+A check runs one of three categories. Each category maps to a runbook TOML file
+under ``examples/fdt_runbooks/`` that lists the individual ``qaic-fdt`` tests to
+run:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 40 45
+
+   * - Category
+     - Tests included
+     - Runbook
+   * - ``quick``
+     - PCI check, device check, quick inference test (ECC check disabled).
+     - ``examples/fdt_runbooks/quick_check_runbook.toml``
+   * - ``medium``
+     - All quick checks, plus ECC check and a longer inference test.
+     - ``examples/fdt_runbooks/medium_check_runbook.toml``
+   * - ``long``
+     - All medium checks, plus a long, maximum-workload inference test.
+     - ``examples/fdt_runbooks/long_check_runbook.toml``
+
+An empty category (``""``) is treated as ``quick``. See the *Check Categories*
+table in :doc:`feature-overview` for the operator-facing summary.
+
+As a concrete example, the shipped ``quick`` runbook contains:
+
+.. code-block:: toml
+
+   [[tests]]
+   name = "PCI Check"
+   id = "pci.check"
+   enabled = true
+
+   [[tests]]
+   name = "Device Check"
+   id = "device.check"
+   enabled = true
+
+   [[tests]]
+   name = "Ecc Check"
+   id = "ecc.check"
+   enabled = false
+
+   [[tests]]
+   name = "Quick inference test"
+   id = "stress.inference"
+   enabled = true
+
+   [tests.parameters]
+   iterations = 10
+
+To change which tests run in a category, edit the corresponding runbook TOML;
+AICM passes it to ``qaic-fdt`` unchanged.
+
+Starting a Diagnostic Test
+--------------------------
+
+Diagnostic reports are delivered in real time over SSE, and each check is
+evaluated once and then discarded. Subscribe to the report stream *before*
+you create the check so you do not miss the event.
+
+The examples below use ``curl`` with ``-u user:pass`` for Basic Auth. Replace
+``<IP>:<PORT>`` and credentials to match your deployment.
+
+Step 1 - Subscribe to the report stream
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Open a streaming connection to the diagnostics SSE endpoint and leave it open.
+The ``-N`` flag disables buffering so events print as they arrive:
+
+.. code-block:: bash
+
+   curl -N -u user:pass \
+        -H "Accept: text/event-stream" \
+        http://<IP>:<PORT>/aicm/sse/diagnostics-report
+
+Step 2 - Identify the target devices
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In another terminal, list the connected device IDs (QIDs):
+
+.. code-block:: bash
+
+   curl -u user:pass http://<IP>:<PORT>/aicm/device_list
+
+The response gives the total count and the available QIDs:
+
+.. code-block:: json
+
+   {
+     "total_devices": 2,
+     "device_ids": [0, 1]
+   }
+
+Step 3 — Create the check
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Issue the check with ``POST /aicm/checks``. The
+body is a JSON object with ``id`` (any string you choose to identify this
+check), ``category``, and ``items``:
+
+.. code-block:: bash
+
+   curl -u user:pass \
+        -X POST http://<IP>:<PORT>/aicm/checks \
+        -H "Content-Type: application/json" \
+        -d '{"id": "check_dev0", "category": "quick", "items": [0]}'
+
+``items`` may mix device IDs (integers) and group IDs (strings); group IDs are
+expanded to their member devices. A successful request returns HTTP
+``201 Created``. An invalid ``category`` returns ``422 Unprocessable Entity``.
+
+Step 4 - Wait for evaluation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+AICM's background loop picks up pending checks every 15 seconds, runs
+``qaic-fdt`` once for the whole check (all resolved devices in a single
+invocation), then removes the check from the queue. Within a few seconds of
+the next evaluation tick, a single report event covering every device in the
+check arrives on the stream from Step 1.
+
+To inspect checks that have been created but not yet evaluated:
+
+.. code-block:: bash
+
+   curl -u user:pass http://<IP>:<PORT>/aicm/checks
+
+End-to-end Python client
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A complete, runnable client that subscribes to the stream, creates a ``quick``
+check, and prints the report is provided in
+``examples/diag_report_subscribe_example.py``. Set the ``USERNAME``,
+``PASSWORD``, ``HOSTNAME``, and ``PORT`` constants at the top, then run:
+
+.. code-block:: bash
+
+   python examples/diag_report_subscribe_example.py
+
+Reading the Result
+------------------
+
+Each SSE event carries one JSON object: a ``DiagReportAlert`` with these
+top-level fields:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 60
+
+   * - Field
+     - Type
+     - Meaning
+   * - ``type``
+     - string
+     - Always ``"report"`` for diagnostic reports.
+   * - ``check_id``
+     - string
+     - The ``id`` you supplied when creating the check.
+   * - ``data``
+     - object
+     - The diagnostics report (see below).
+   * - ``alert_time``
+     - string
+     - ISO-8601 timestamp of when the report was produced.
+
+Pass or fail: the ``result`` block
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The quickest signal is ``data.result``, an aggregate card count:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``cards_total``
+     - Number of cards covered by this report.
+   * - ``cards_pass``
+     - Cards that passed all enabled tests.
+   * - ``cards_fail``
+     - Cards that failed at least one test.
+   * - ``cards_unavailable``
+     - Cards that could not be tested (e.g. not accessible).
+
+A card passed when ``cards_fail == 0`` and ``cards_unavailable == 0``.
+Any non-zero ``cards_fail`` or ``cards_unavailable`` means the run needs
+attention.
+
+Per-device detail: the ``devices`` list
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``data.devices[]`` gives per-card results. Each device has ``pci_address``,
+``dev_status``, an optional ``info`` block (``qid``, ``sku_type``,
+``hw_serial_string``), and a ``tests`` list. Each test has a ``test_id``,
+``severity``, ``category``, and when the test flags an issue, an optional
+``context`` with a human-readable ``description`` and recommended ``action``.
+``data.host.status`` reports overall host health.
+
+Example: a passing report
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: json
+
+   {
+     "devices": [
+       {
+         "pci_address": "0000:00:00.0",
+         "dev_status": "Ready",
+         "info": {
+           "qid": 123,
+           "sku_type": "Pcie Ultra",
+           "hw_serial_string": "dummy"
+         },
+         "tests": [
+           {
+             "test_id": "test1",
+             "severity": "None",
+             "category": "dummy"
+           }
+         ]
+       }
+     ],
+     "host": {
+       "status": "Ok"
+     },
+     "result": {
+       "cards_total": 1,
+       "cards_pass": 1,
+       "cards_fail": 0,
+       "cards_unavailable": 0
+     }
+   }
+
+Here ``cards_fail`` and ``cards_unavailable`` are both ``0`` — the card passed.
+
+Example: a failing report
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When a test fails, the offending entry carries a higher ``severity`` and a
+``context`` describing the problem and the recommended action, and
+``result.cards_fail`` is non-zero:
+
+.. code-block:: json
+
+   {
+     "devices": [
+       {
+         "pci_address": "0000:00:00.0",
+         "dev_status": "Ready",
+         "info": {
+           "qid": 0,
+           "sku_type": "Pcie Ultra",
+           "hw_serial_string": "dummy"
+         },
+         "tests": [
+           {
+             "test_id": "pci.check",
+             "severity": "Error",
+             "category": "pci",
+             "context": {
+               "description": "PCIe link is running below the expected width.",
+               "action": "Reseat the card and re-run the diagnostic."
+             }
+           }
+         ]
+       }
+     ],
+     "host": {
+       "status": "Ok"
+     },
+     "result": {
+       "cards_total": 1,
+       "cards_pass": 0,
+       "cards_fail": 1,
+       "cards_unavailable": 0
+     }
+   }
+
+Read the ``context.description`` for what went wrong and ``context.action`` for
+the recommended next step.
+
+Troubleshooting
+---------------
+
+.. note::
+
+   Special error cases in diagnostic report alerts:
+
+   1. If a card has a problem, the alert reports ``User permission error``.
+      Run AICM as root for complete device access.
+   2. If the alert reports
+      ``Command not found: /opt/qti-aic/tools/qaic-version-util``,
+      grant execute permission:
+      ``chmod 755 /opt/qti-aic/tools/qaic-version-util``.
+
+If no report arrives at all, confirm that: the SSE subscription from Step 1 is
+still open; the check was accepted (HTTP ``201``); you waited at least one
+15-second evaluation cycle; and ``qaic-fdt`` exists and is executable at
+``/opt/qti-aic/tools/qaic-fdt``.
+
+See Also
+--------
+
+* :doc:`feature-overview` - *Diagnostics Checks* for the operator-facing API summary.
+* :doc:`user-guide` - Installation, startup, and authentication.

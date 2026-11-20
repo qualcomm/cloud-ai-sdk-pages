@@ -1,0 +1,419 @@
+.. _reference_to_openshift:
+
+OpenShift
+=========
+You can use `Red Hat OpenShift <https://www.redhat.com/en/technologies/cloud-computing/openshift>`__
+to deploy containerized Qualcomm Cloud AI 100 workloads. The `Qualcomm Cloud AIC
+Operator <https://github.com/qualcomm/aic-operator>`__ automates installation and
+configuration of the Cloud AI Linux device drivers and the QAIC device plugin on
+OpenShift worker nodes with Cloud AI 100 accelerators.
+
+The Qualcomm Cloud AIC Operator is `Red Hat certified <https://catalog.redhat.com/en/software/container-stacks/detail/6763b5f279585b944b37e536>`__.
+The Qualcomm Cloud AI 100 hardware is also listed in the `Red Hat Ecosystem
+Catalog <https://catalog.redhat.com/en/hardware/detail/286087#overview>`__.
+
+.. figure:: ./openshift_architecture.png
+   :width: 90%
+
+   Qualcomm Cloud AI 100 architecture on Red Hat OpenShift.
+
+Prerequisites
+-------------
+
+- An OpenShift 4.18 or later cluster.
+- A Cloud AI 100 Ultra accelerator installed in each worker node that will run
+  Cloud AI workloads.
+- Cluster administrator access and the ``oc`` CLI configured for the cluster.
+- A container registry reachable by the cluster. Kernel Module Management builds
+  a kernel-specific driver image and pushes it to this registry.
+- The Red Hat Kernel Module Management (KMM) Operator version 2.0 or later and
+  the Red Hat Node Feature Discovery (NFD) Operator version 4.16 or later.
+
+.. note::
+
+   Use the Red Hat-provided KMM and NFD Operators, rather than Community or Hub
+   variants.
+
+Container images and release compatibility
+------------------------------------------
+
+Use the `Qualcomm Cloud AI Containers package registry <https://github.com/orgs/qualcomm/packages?repo_name=cloud-ai-containers>`__
+to locate explicitly tagged operator operands and Cloud AI inference images. Do
+not combine a released AIC Operator with arbitrary or ``latest`` operand tags.
+
+The following published version set is used by the complete examples on this
+page. Use these values together; don't substitute an arbitrary or ``latest``
+tag for one operand.
+
+.. list-table:: Release compatibility matrix
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Component
+     - Version
+   * - Red Hat OpenShift
+     - Version 4.18 or later.
+   * - KMM Operator
+     - Red Hat KMM version 2.0 or later.
+   * - NFD Operator
+     - Red Hat NFD version 4.16 or later.
+   * - AIC Operator
+     - ``v0.5.0``
+   * - Cloud AI driver and firmware
+     - ``0.5.0_1.23.2.0``
+   * - QAIC device plugin
+     - ``1.23.2.0``
+   * - QAIC device agent
+     - ``0.5.0_1.23.2.0``
+   * - Inference workload image
+     - ``ghcr.io/qualcomm/cloud_ai_inference_ubuntu24:1.23.2.0`` for the validation
+       workload below.
+
+When moving to another AIC Operator release, update the complete set rather
+than only one operand. A later documentation release should provide a new,
+complete compatibility matrix and AIC custom-resource example.
+
+Install the required Operators
+------------------------------
+
+In the OpenShift web console, open **Ecosystem > Software Catalog**, then install:
+
+#. **Kernel Module Management**, provided by Red Hat, in the default
+   ``openshift-kmm`` namespace.
+#. **Node Feature Discovery**, provided by Red Hat, in the default
+   ``openshift-nfd`` namespace. Create the default ``NodeFeatureDiscovery``
+   custom resource after installation.
+#. **AIC Operator**, provided by Qualcomm Technologies, Inc. Select **A
+   specific namespace on the cluster** and use ``aic-operator-system``. Create
+   that namespace in the console if it does not already exist.
+
+   On the **Install Operator** form, select an update channel whose displayed
+   version is ``0.5.0 or later`` (the console version of the ``v0.5.0`` release in the
+   compatibility matrix), then select **Manual** approval. Before approving
+   the InstallPlan, confirm that it installs version ``0.5.0``. After the
+   installation succeeds, retain **Manual** approval so a later OperatorHub
+   version isn't installed automatically. If the console doesn't offer an
+   InstallPlan for version ``0.5.0``, don't install a later version with this
+   operand set.
+
+Configure registry access
+-------------------------
+
+Create a container registry secret with pull and push permission for the repository
+where KMM will publish the kernel-specific driver image. Reference this secret
+from ``spec.imageRepoSecret.name`` in the ``AIC`` custom resource:
+
+.. code:: bash
+
+   oc create secret docker-registry <pull-secret-name> \
+     --docker-server=<container-registry-server> \
+     --docker-username=<username> \
+     --docker-password=<password-or-token> \
+     --namespace=aic-operator-system
+
+The source, device-plugin, and device-agent images in the AIC example below
+are public. The secret is required for the private or internal
+``driversImage`` repository that KMM builds and publishes.
+
+KMM firmware configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure KMM with the host firmware path before creating an AIC instance. The
+published AIC Operator configuration uses ``/var/lib/firmware/updates``; use a
+different value only when the Cloud AI firmware files are stored elsewhere on
+every accelerator worker.
+
+.. warning::
+
+   The following ``oc apply`` replaces the complete
+   ``kmm-operator-manager-config`` ConfigMap. First preserve the existing
+   configuration. If it contains custom settings, merge the ``worker`` block
+   below into its existing ``controller_config.yaml`` instead of applying this
+   replacement unchanged.
+
+.. code:: bash
+
+   oc get configmap kmm-operator-manager-config -n openshift-kmm -o yaml \
+     > kmm-operator-manager-config.backup.yaml
+
+   cat <<'EOF' | oc apply -f -
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: kmm-operator-manager-config
+     namespace: openshift-kmm
+   data:
+     controller_config.yaml: |
+       worker:
+         firmwareHostPath: /var/lib/firmware/updates
+   EOF
+
+Verify the ConfigMap, restart the KMM controller, then wait for its replacement
+pods to become ready:
+
+.. code:: bash
+
+   oc get configmap kmm-operator-manager-config -n openshift-kmm -o yaml
+   oc delete pod -n openshift-kmm -l app.kubernetes.io/component=kmm
+   oc get pods -n openshift-kmm -l app.kubernetes.io/component=kmm
+
+Confirm that ``controller_config.yaml`` contains the selected
+``firmwareHostPath`` and that all returned controller pods show ``Running``.
+For other KMM configuration options, see the `operator installation guide
+<https://github.com/qualcomm/aic-operator#3-configure-the-cluster>`__.
+
+Create an AIC instance
+----------------------
+
+Create an ``AIC`` custom resource in ``aic-operator-system``. It identifies the
+driver source image, the registry location for generated driver images, device
+plugin and device-agent images, and the registry secret created above. Save the
+following complete AIC Operator v0.5.0 example as ``aic-sample.yaml``. It uses
+the published v0.5.0 operand set; change the registry server, registry path,
+and secret name for your environment, but keep the operand versions together.
+KMM expands ``${KERNEL_VERSION}`` when it builds the driver image.
+
+.. code:: yaml
+
+   apiVersion: aic.qualcomm.com/v1
+   kind: AIC
+   metadata:
+     name: aic-sample
+     namespace: aic-operator-system
+     labels:
+       app.kubernetes.io/name: aic
+       app.kubernetes.io/instance: aic-sample
+       app.kubernetes.io/part-of: aic-operator
+       app.kubernetes.io/managed-by: kustomize
+       app.kubernetes.io/created-by: aic-operator
+   spec:
+     sourceImage: "ghcr.io/qualcomm/cloud_ai_qaic_kmd_src"
+     driversImage: "<registry-server>/<registry-path>/cloud_ai_qaic_kmd_ko:0.5.0_1.23.2.0_${KERNEL_VERSION}"
+     driversVersion: "0.5.0_1.23.2.0"
+     devicePluginImage: "ghcr.io/qualcomm/cloud_ai_k8s_device_plugin"
+     devPluginVersion: "1.23.2.0"
+     deviceAgentImage: "ghcr.io/qualcomm/cloud_ai_qaic_deviceagent"
+     deviceAgentVersion: "0.5.0_1.23.2.0"
+     imageRepoSecret:
+       name: <pull-secret-name>
+
+Apply the resource:
+
+.. code:: bash
+
+   oc apply -f aic-sample.yaml
+
+Set ``<registry-server>/<registry-path>`` to the same image repository for
+which ``<pull-secret-name>`` has pull and push permission. Do not replace the
+``${KERNEL_VERSION}`` token; KMM substitutes the worker kernel version when it
+builds the driver image.
+
+The AIC Operator deploys the QAIC device plugin on accelerator-equipped nodes.
+Those nodes then advertise the ``qualcomm.com/qaic`` extended resource for
+OpenShift scheduling.
+
+Deployment verification checklist
+---------------------------------
+
+After completing each stage, use the following checks before proceeding to the
+next one. Don't deploy a workload until the final resource check succeeds.
+
+#. **KMM readiness.** After installing KMM, verify its controller pods:
+
+   .. code:: bash
+
+      oc get pods -n openshift-kmm -l app.kubernetes.io/component=kmm
+
+   All returned KMM controller pods should show ``Running``.
+
+#. **NFD readiness.** After creating the default ``NodeFeatureDiscovery``
+   custom resource, verify the resource and its pods:
+
+   .. code:: bash
+
+      oc get nodefeaturediscovery -n openshift-nfd
+      oc get pods -n openshift-nfd
+
+   The default ``NodeFeatureDiscovery`` resource should be listed and the NFD
+   pods should show ``Running``.
+
+#. **AIC Operator readiness.** After installing the AIC Operator, verify its
+   controller:
+
+   .. code:: bash
+
+      oc get pods -n aic-operator-system
+
+   The ``aic-operator-controller-manager-*`` pod should show ``2/2`` in the
+   ``READY`` column and ``Running`` in the ``STATUS`` column.
+
+#. **AIC instance and device-plugin readiness.** After applying the ``AIC``
+   custom resource, verify the resources it creates:
+
+   .. code:: bash
+
+      oc get aic -n aic-operator-system
+      oc get module -n aic-operator-system
+      oc get daemonset -n aic-operator-system
+      oc get pods -n aic-operator-system -o wide
+
+   The ``AIC`` resource and a same-named KMM ``Module`` should be present. When
+   KMM has completed the driver build and load, the QAIC device-plugin pods and
+   device-agent DaemonSet pods should show ``Running`` on QAIC worker nodes.
+
+#. **Node resource advertisement.** Verify that NFD selected the accelerator
+   workers and that the device plugin registered a nonzero extended resource:
+
+   .. code:: bash
+
+      oc get nodes -l qualcomm.com/qaic=true
+      oc describe node <qaic-worker> | grep qualcomm.com/qaic
+
+   The worker must have a nonzero ``qualcomm.com/qaic`` value in both
+   ``Capacity`` and ``Allocatable`` before a workload can be scheduled.
+
+Deployment configuration
+------------------------
+
+Request Cloud AI devices from a workload using ``qualcomm.com/qaic`` in both
+resource requests and limits. The following complete test deployment uses the
+published Cloud AI inference image and keeps a shell open for validation.
+Replace the image and command for a serving workload, while retaining the QAIC
+resource request and group setting. The validation deployment uses the
+``aic-operator-system`` namespace; use a separate workload namespace for
+production deployments. Save this manifest as ``qaic-serving.yaml``:
+
+.. code:: yaml
+
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: qaic-serving
+     namespace: aic-operator-system
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: qaic-serving
+     template:
+       metadata:
+         labels:
+           app: qaic-serving
+       spec:
+         containers:
+           - name: qaic-serving
+             image: ghcr.io/qualcomm/cloud_ai_inference_ubuntu24:1.23.2.0
+             command: ["/bin/bash", "-ce", "tail -f /dev/null"]
+             resources:
+               requests:
+                 qualcomm.com/qaic: 1
+               limits:
+                 qualcomm.com/qaic: 1
+             securityContext:
+               runAsGroup: 995
+
+Security context and workload registry access
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``runAsGroup: 995`` setting runs the workload process with the ``qaic``
+group ID used by the Cloud AI container image. It doesn't request a privileged
+container or an elevated SCC. Validate the workload with the target namespace's
+service account before deploying it:
+
+.. code:: bash
+
+   oc apply --dry-run=server -f qaic-serving.yaml
+
+Clusters can enforce different restricted SCC policies. If admission rejects the
+workload, work with the cluster administrator to make the smallest
+namespace- or service-account-scoped policy change required by the workload.
+Don't grant ``privileged`` or ``anyuid`` only to bypass an SCC rejection.
+
+The registry secret configured for KMM is referenced by
+``spec.imageRepoSecret.name`` and permits KMM to build, push, and pull the
+kernel-specific driver image. It's not an image-pull secret for an application
+workload. The test image above is public. If a replacement workload image is
+private, create a pull secret in the workload namespace and reference it from
+the pod template:
+
+.. code:: bash
+
+   oc create secret docker-registry <workload-pull-secret> \
+     --docker-server=<container-registry-server> \
+     --docker-username=<username> \
+     --docker-password=<password-or-token> \
+     --namespace=<your-namespace>
+
+.. code:: yaml
+
+   spec:
+     template:
+       spec:
+         imagePullSecrets:
+           - name: <workload-pull-secret>
+
+Omit ``imagePullSecrets`` when the inference image is public.
+
+Apply the workload and confirm that it's scheduled to a QAIC-enabled worker:
+
+.. code:: bash
+
+   oc apply -f qaic-serving.yaml
+   oc get pods -n aic-operator-system -o wide
+   oc describe node <worker-node>
+
+The node description should report ``qualcomm.com/qaic`` capacity and allocatable
+resources. To run the inference validation included in the test image:
+
+.. code:: bash
+
+   oc exec -it deployment/qaic-serving -n aic-operator-system -- /bin/bash
+   source vllm_env/bin/activate
+   python /opt/qti-aic/integrations/vllm-qaic/examples/qaic.py
+
+Troubleshooting
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 30 35
+
+   * - Symptom
+     - Likely cause
+     - Resolution
+   * - No ``qualcomm.com/qaic`` capacity on an accelerator worker
+     - The AIC instance, driver, or device plugin isn't ready.
+     - Check ``oc get aic -n aic-operator-system`` and the pods in that namespace. Confirm that the worker has a supported accelerator and that the driver image build completed.
+   * - Driver image build or pull fails
+     - KMM can't authenticate to, or write to, the configured registry.
+     - Confirm that the secret referenced by the AIC resource has pull and push permissions and that cluster nodes can reach the registry.
+   * - Workload remains Pending
+     - No node has sufficient available QAIC resources.
+     - Inspect ``oc describe pod <pod-name> -n <namespace>`` and check the QAIC resource capacity and allocation on candidate nodes.
+
+Uninstall
+---------
+
+If you created the validation deployment, delete it first:
+
+.. code:: bash
+
+   oc delete deployment qaic-serving -n aic-operator-system
+
+Delete the ``AIC`` custom resource before uninstalling the AIC Operator. This
+stops the QAIC device plugin and allows the operator to unload the drivers and
+remove its managed resources:
+
+.. code:: bash
+
+   oc delete aic aic-sample -n aic-operator-system
+   oc get aic -n aic-operator-system
+
+After the ``AIC`` resource is gone, uninstall **AIC Operator** from the OpenShift
+web console: **Ecosystem > Installed Operators > AIC Operator > Actions >
+Uninstall Operator**.
+
+Next steps
+----------
+
+* Review the `Qualcomm Cloud AIC Operator repository <https://github.com/qualcomm/aic-operator>`__ for release notes and optional development information.

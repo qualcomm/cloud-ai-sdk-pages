@@ -1,0 +1,23 @@
+Model serving
+=============
+
+Modern LLM applications require scalable, high‑performance serving engines that can efficiently host large models and deliver low‑latency inference.
+The Cloud AI SDK supports the following serving backends to give you flexibility in how models are deployed, optimized, and integrated into production workflows.
+For production Kubernetes deployments with disaggregated serving and autoscaling, see :doc:`/Getting-Started/Deployment/Kubernetes/llm-d/index`.
+
+.. toctree::
+   :maxdepth: 1
+
+   vLLM-Serving/index
+   Triton-Serving/index
+   TGI-Serving/index
+
+This section provides a unified view of these serving options and helps you select the right runtime for your workload.
+
+.. seealso::
+
+   After successfully serving your model using vLLM, Triton, or TGI, you can further optimize performance or implement specialized logic:
+
+   * :doc:`Model sharding </Getting-Started/Features/model_sharding/index>`: Distribute your model across multiple Cloud AI 100 devices to increase throughput.
+   * :doc:`Object detection postprocessing </Getting-Started/Features//object-detection-postprocessing/Object-Detection-Post-processing>`: Offload NMS and bounding box logic directly to the hardware.
+   * :doc:`Custom operations (C++) </Getting-Started/Features/custom_ops/index>`: Integrate specialized kernels for non-standard model architectures.

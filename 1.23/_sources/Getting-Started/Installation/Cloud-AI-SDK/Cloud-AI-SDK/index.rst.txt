@@ -1,0 +1,29 @@
+:orphan:
+
+Legacy SDK installation URL
+============================
+
+This page has moved. Redirecting to the current SDK installation guide.
+
+.. raw:: html
+
+   <script>
+   (function () {
+     const destinations = {
+       "#apps-sdk": "../../apps-sdk.html",
+       "#platform-sdk": "../../platform-sdk.html"
+     };
+     const destination = destinations[window.location.hash.toLowerCase()]
+         || "../../sdk-installation.html";
+     window.location.replace(new URL(destination, window.location.href).href);
+   })();
+   </script>
+
+   <noscript>
+     <p>Choose the current guide:</p>
+     <ul>
+       <li><a href="../../sdk-installation.html">SDK installation</a></li>
+       <li><a href="../../apps-sdk.html">Apps SDK</a></li>
+       <li><a href="../../platform-sdk.html">Platform SDK</a></li>
+     </ul>
+   </noscript>
